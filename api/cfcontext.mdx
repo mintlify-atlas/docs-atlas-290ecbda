@@ -1,0 +1,214 @@
+---
+title: CFContext
+description: Control flow obfuscation context and orchestration
+---
+
+The `CFContext` class orchestrates control flow obfuscation transformations on Lua bytecode chunks.
+
+## Overview
+
+`CFContext` applies various control flow obfuscation techniques to chunks marked with special global markers (`IB_MAX_CFLOW_START` and `IB_MAX_CFLOW_END`). It coordinates multiple transformation passes to make code flow harder to analyze.
+
+## Constructor
+
+```csharp
+public CFContext(Chunk lChunk)
+```
+
+<ParamField path="lChunk" type="Chunk" required>
+  The root chunk to process for control flow obfuscation
+</ParamField>
+
+## Properties
+
+<ResponseField name="lChunk" type="Chunk">
+  The root Lua chunk being processed
+</ResponseField>
+
+## Methods
+
+### DoChunk
+
+```csharp
+public void DoChunk(Chunk c)
+```
+
+Applies control flow obfuscation to a single chunk and recursively processes all nested function chunks.
+
+<ParamField path="c" type="Chunk" required>
+  The chunk to transform
+</ParamField>
+
+**Process:**
+
+1. Scans for `IB_MAX_CFLOW_START` and `IB_MAX_CFLOW_END` markers
+2. Extracts instruction ranges between markers
+3. Applies transformations in sequence:
+   - Test Spam (adds conditional noise)
+   - Bounce (adds indirect jumps)
+   - Test Flip (inverts conditional logic)
+4. Inserts `NewStack` opcode if control flow was applied
+5. Recursively processes nested function chunks
+
+### DoChunks
+
+```csharp
+public void DoChunks()
+```
+
+Entry point for control flow obfuscation. Performs inlining pass first, then applies control flow transformations.
+
+**Pipeline:**
+
+<Steps>
+  <Step title="Inlining">
+    Inlines function calls to flatten control flow using `Inlining` transformer
+  </Step>
+  
+  <Step title="Control Flow">
+    Applies `DoChunk` to the root chunk, which recursively processes all chunks
+  </Step>
+</Steps>
+
+## Control Flow Markers
+
+To selectively apply control flow obfuscation to specific code sections, use global markers in your Lua source:
+
+```lua
+-- Enable control flow obfuscation for this section
+IB_MAX_CFLOW_START()
+
+-- Your sensitive code here
+local function criticalLogic()
+    -- This code will have control flow obfuscation applied
+end
+
+IB_MAX_CFLOW_END()
+```
+
+<Note>
+These markers are removed during obfuscation and replaced with `Move` instructions (effectively NOPs).
+</Note>
+
+## Transformation Types
+
+The following control flow transformations are applied in sequence:
+
+| Transformation | Purpose | Source |
+|---------------|---------|--------|
+| **Test Spam** | Adds bogus conditional tests | `Control Flow/Types/TestSpam.cs` |
+| **Bounce** | Inserts indirect jumps | `Control Flow/Types/Bounce.cs` |
+| **Test Flip** | Inverts conditional logic | `Control Flow/Types/TestFlip.cs` |
+| **Inlining** | Flattens function calls | `Control Flow/Types/Inlining.cs` |
+
+<Warning>
+Control flow obfuscation significantly increases code complexity and runtime overhead. Use markers to apply it selectively to security-critical sections only.
+</Warning>
+
+## Usage Example
+
+```csharp
+using IronBrew2.Obfuscator.Control_Flow;
+using IronBrew2.Bytecode_Library.Bytecode;
+using IronBrew2.Bytecode_Library.IR;
+
+// Deserialize bytecode
+Deserializer des = new Deserializer(File.ReadAllBytes("script.luac"));
+Chunk lChunk = des.DecodeFile();
+
+// Apply control flow obfuscation
+CFContext cf = new CFContext(lChunk);
+cf.DoChunks();
+
+// Continue with further obfuscation or serialization
+// ObfuscationContext context = new ObfuscationContext(lChunk);
+// ...
+```
+
+## Integration with IB2.Obfuscate
+
+`CFContext` is automatically invoked when `ControlFlow` is enabled in `ObfuscationSettings`:
+
+```csharp
+var settings = new ObfuscationSettings
+{
+    ControlFlow = true  // Enables CFContext processing
+};
+
+IB2.Obfuscate("temp", "input.lua", settings, out string error);
+```
+
+## How It Works
+
+### 1. Marker Detection
+
+The `DoChunk` method scans for special global function calls:
+
+```csharp
+if (instr.OpCode == Opcode.GetGlobal && Instructs[index + 1].OpCode == Opcode.Call)
+{
+    string str = ((Constant) instr.RefOperands[0]).Data.ToString();
+    
+    if (str == "IB_MAX_CFLOW_START")
+    {
+        // Mark beginning of protected section
+    }
+    else if (str == "IB_MAX_CFLOW_END")
+    {
+        // Apply transformations to instructions in range
+    }
+}
+```
+
+### 2. Transformation Application
+
+For each marked section, transformations are applied sequentially:
+
+```csharp
+// Extract instruction range
+List<Instruction> nIns = c.Instructions.Skip(cBegin).Take(cEnd - cBegin).ToList();
+
+// Apply Test Spam
+TestSpam.DoInstructions(c, nIns);
+
+// Refresh instruction list after transformation
+nIns = c.Instructions.Skip(cBegin).Take(cEnd - cBegin).ToList();
+
+// Apply Bounce
+Bounce.DoInstructions(c, nIns);
+```
+
+### 3. Stack Initialization
+
+If any control flow was applied, a `NewStack` instruction is inserted at the beginning:
+
+```csharp
+if (chunkHasCflow)
+    c.Instructions.Insert(0, new Instruction(c, Opcode.NewStack));
+```
+
+This initializes additional stack space needed for the control flow obfuscation logic.
+
+## Performance Impact
+
+Control flow obfuscation adds significant overhead:
+
+- **Instruction count**: Increases by 50-200% depending on transformations
+- **Execution time**: 2-5x slower due to indirect jumps and extra conditionals
+- **Code size**: Larger due to additional instructions
+
+For best results:
+- Apply selectively using markers
+- Disable for performance-critical hot paths
+- Test obfuscated code thoroughly
+
+## Related APIs
+
+- [ObfuscationSettings](/api/obfuscation-settings) - Enable/disable control flow obfuscation
+- [Chunk](/api/chunk) - The bytecode structure being transformed
+- [Instruction](/api/instruction) - Individual instructions being manipulated
+- [Control Flow Concepts](/concepts/control-flow) - Detailed explanation of techniques
+
+## Source Reference
+
+Source: `IronBrew2/Obfuscator/Control Flow/CFContext.cs:12`
