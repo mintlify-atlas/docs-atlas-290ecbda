@@ -1,0 +1,100 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "IronBrew 2",
+  "projectDescription": "VM-based Lua 5.1 obfuscator with advanced control flow and bytecode manipulation",
+  "theme": "aspen",
+  "primaryColor": "#6366f1",
+  "lightColor": "#818cf8",
+  "darkColor": "#4338ca",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "cli/usage",
+              "cli/options",
+              "cli/examples"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/vm-architecture",
+              "concepts/bytecode",
+              "concepts/obfuscation-techniques",
+              "concepts/control-flow"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/settings",
+              "configuration/encryption",
+              "configuration/super-operators"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core API",
+            "pages": [
+              "api/ib2",
+              "api/obfuscation-settings",
+              "api/obfuscation-context"
+            ]
+          },
+          {
+            "group": "Bytecode Library",
+            "pages": [
+              "api/chunk",
+              "api/instruction",
+              "api/deserializer",
+              "api/serializer"
+            ]
+          },
+          {
+            "group": "VM Generation",
+            "pages": [
+              "api/generator",
+              "api/opcodes"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "VM-based obfuscation",
+    "Control flow obfuscation",
+    "String encryption",
+    "Bytecode manipulation",
+    "Super operators",
+    "Mutation system",
+    "Lua 5.1 compatibility"
+  ],
+  "publicApiSurface": [
+    "IB2.Obfuscate()",
+    "ObfuscationSettings",
+    "Chunk",
+    "Instruction",
+    "Deserializer",
+    "Serializer",
+    "Generator",
+    "CFContext",
+    "ObfuscationContext"
+  ]
+}
