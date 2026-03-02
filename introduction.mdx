@@ -1,0 +1,180 @@
+---
+title: Introduction
+description: VM-based Lua 5.1 obfuscation with advanced control flow and bytecode manipulation
+---
+
+# IronBrew 2
+
+IronBrew 2 is a powerful VM-based obfuscator for Lua 5.1 that provides enterprise-grade protection for your Lua scripts through advanced bytecode manipulation, control flow obfuscation, and a custom virtual machine runtime.
+
+Unlike simple obfuscators that only rename variables, IronBrew 2 transforms your Lua bytecode into a completely custom instruction set executed by a generated VM, making reverse engineering significantly more difficult.
+
+## Quick Links
+
+<CardGroup cols={3}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Obfuscate your first Lua script in under 5 minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Set up IronBrew 2 on your system
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/usage">
+    Complete command-line interface documentation
+  </Card>
+</CardGroup>
+
+## Key Features
+
+### VM-Based Obfuscation
+
+IronBrew 2 doesn't just obfuscate your code - it completely transforms it. Your Lua bytecode is converted into custom VM instructions that are executed by a generated virtual machine embedded in the output.
+
+```lua
+-- Original code
+print("Hello, World!")
+
+-- After obfuscation: Custom VM bytecode executed by generated runtime
+-- The VM interprets instructions like OP_LOADSTR, OP_CALL, etc.
+```
+
+### Control Flow Obfuscation
+
+With control flow obfuscation enabled, IronBrew 2 transforms the execution path of your code through several techniques:
+
+- **Bouncing**: Redirects execution through intermediate jumps
+- **Test Flipping**: Inverts conditional logic
+- **Number Mutation**: Transforms arithmetic operations
+- **Inlining**: Embeds function calls directly
+
+### String Encryption
+
+Strings in your code can be encrypted to prevent static analysis:
+
+```csharp
+// ObfuscationSettings configuration
+public class ObfuscationSettings
+{
+    public bool EncryptStrings;              // Encrypt all strings
+    public bool EncryptImportantStrings;      // Encrypt only sensitive strings
+    public int DecryptTableLen;               // Decryption table size (default: 500)
+}
+```
+
+### Super Operators
+
+Super operators combine multiple VM instructions into single complex operations, further obscuring the execution logic:
+
+```csharp
+public bool SuperOperators;           // Enable super operators
+public int MaxMiniSuperOperators;     // Max mini super ops (default: 120)
+public int MaxMegaSuperOperators;     // Max mega super ops (default: 120)
+```
+
+### Bytecode Manipulation
+
+The obfuscator performs several bytecode-level transformations:
+
+- Custom instruction encoding
+- Constant table shuffling
+- Register allocation obfuscation
+- Stack manipulation techniques
+
+### Mutation System
+
+The mutation system transforms arithmetic and comparison operations into more complex equivalents:
+
+```csharp
+public bool Mutate;              // Enable mutation system
+public int MaxMutations;         // Maximum mutations (default: 200)
+```
+
+## Use Cases
+
+### Game Script Protection
+
+Protect game logic, anti-cheat systems, and proprietary algorithms in Lua-based game engines (Roblox, Garry's Mod, etc.).
+
+### Proprietary Algorithm Protection
+
+Obfuscate business logic and algorithms implemented in Lua to prevent unauthorized copying or reverse engineering.
+
+### Anti-Tampering
+
+Make it significantly harder for users to modify or bypass license checks, authentication systems, or other security measures.
+
+### Intellectual Property Protection
+
+Protect your Lua codebase when distributing to clients or end-users who shouldn't have access to the source code.
+
+## How It Works
+
+IronBrew 2 follows a multi-stage obfuscation pipeline:
+
+<Steps>
+  <Step title="Validation">
+    Your input Lua file is validated by compiling it with `luac` to ensure it's syntactically correct.
+  </Step>
+  
+  <Step title="Comment Stripping">
+    Comments are stripped using LuaSrcDiet minifier to clean the source code.
+  </Step>
+  
+  <Step title="String Encryption">
+    If enabled, strings are encrypted and replaced with decryption calls.
+  </Step>
+  
+  <Step title="Bytecode Compilation">
+    The Lua source is compiled to bytecode using `luac`.
+  </Step>
+  
+  <Step title="Control Flow Obfuscation">
+    If enabled, control flow is transformed using various techniques (bouncing, test flipping, mutations, etc.).
+  </Step>
+  
+  <Step title="VM Generation">
+    A custom virtual machine is generated that interprets your obfuscated bytecode.
+  </Step>
+  
+  <Step title="Minification">
+    The final VM code is minified using LuaSrcDiet with maximum optimization.
+  </Step>
+  
+  <Step title="Watermarking">
+    The output is watermarked with the IronBrew 2 header.
+  </Step>
+</Steps>
+
+## Architecture
+
+IronBrew 2 is built with C# (.NET Core 3.1) and consists of several core components:
+
+- **Bytecode Library**: Deserializes Lua bytecode and provides an IR for manipulation
+- **Obfuscator Engine**: Transforms bytecode using various obfuscation techniques
+- **VM Generator**: Creates custom VM code tailored to your obfuscated bytecode
+- **Control Flow Engine**: Implements control flow obfuscation techniques
+- **Encryption System**: Handles string and constant encryption
+
+<Note>
+  IronBrew 2 targets **Lua 5.1** bytecode specifically. Make sure your Lua code is compatible with Lua 5.1.
+</Note>
+
+## Performance Considerations
+
+VM-based obfuscation inherently adds runtime overhead since your code is interpreted by a custom VM rather than executed natively. Consider:
+
+- **Execution Speed**: Obfuscated code will run slower than native Lua
+- **Memory Usage**: The VM adds additional memory overhead
+- **File Size**: Obfuscated output is larger due to the embedded VM
+
+For performance-critical sections, you may want to selectively obfuscate only sensitive parts of your codebase.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Install IronBrew 2" icon="download" href="/installation">
+    Get IronBrew 2 set up on your system
+  </Card>
+  <Card title="Quick Start Guide" icon="rocket" href="/quickstart">
+    Obfuscate your first script
+  </Card>
+</CardGroup>

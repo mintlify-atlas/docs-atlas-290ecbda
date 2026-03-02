@@ -1,0 +1,283 @@
+---
+title: 'Deserializer'
+description: 'Decodes Lua 5.1 bytecode files into IR structures'
+---
+
+The `Deserializer` class reads and parses compiled Lua 5.1 bytecode files (`.luac`), converting the binary format into an intermediate representation (IR) of Chunks, Instructions, and Constants.
+
+## Namespace
+
+```csharp
+IronBrew2.Bytecode_Library.Bytecode
+```
+
+## Constructor
+
+```csharp
+public Deserializer(byte[] input)
+```
+
+<ParamField path="input" type="byte[]" required>
+  The raw bytecode data to deserialize
+</ParamField>
+
+## Properties
+
+<ResponseField name="InstructionMappings" type="Dictionary<Opcode, InstructionType>" static>
+  Static dictionary mapping each Opcode to its InstructionType (ABC, ABx, or AsBx)
+</ResponseField>
+
+## Primary Methods
+
+### DecodeFile
+
+```csharp
+public Chunk DecodeFile()
+```
+
+Decodes a complete Lua bytecode file, including the header and main chunk.
+
+<ResponseField name="returns" type="Chunk">
+  The root chunk representing the compiled Lua script
+</ResponseField>
+
+**Exceptions:**
+- Throws `Exception` if the file header is invalid (not a Lua bytecode file)
+- Throws `Exception` if the Lua version is not 5.1
+
+<Note>
+  This is the main entry point for deserializing bytecode. It validates the file format, reads encoding parameters (endianness, sizes), and decodes the main chunk recursively.
+</Note>
+
+## Chunk Decoding Methods
+
+### DecodeChunk
+
+```csharp
+public Chunk DecodeChunk()
+```
+
+Decodes a single chunk from the bytecode stream, including its metadata, instructions, constants, and nested functions.
+
+<ResponseField name="returns" type="Chunk">
+  The decoded chunk with all references set up
+</ResponseField>
+
+### DecodeChunks
+
+```csharp
+public List<Chunk> DecodeChunks()
+```
+
+Decodes a list of chunks (nested functions).
+
+<ResponseField name="returns" type="List<Chunk>">
+  List of decoded chunks
+</ResponseField>
+
+## Instruction Decoding Methods
+
+### DecodeInstruction
+
+```csharp
+public Instruction DecodeInstruction(Chunk chunk, int index)
+```
+
+Decodes a single instruction from the bytecode stream.
+
+<ParamField path="chunk" type="Chunk" required>
+  The parent chunk containing this instruction
+</ParamField>
+
+<ParamField path="index" type="int" required>
+  The instruction index within the chunk
+</ParamField>
+
+<ResponseField name="returns" type="Instruction">
+  The decoded instruction with opcode and operands
+</ResponseField>
+
+### DecodeInstructions
+
+```csharp
+public List<Instruction> DecodeInstructions(Chunk chunk)
+```
+
+Decodes all instructions for a chunk.
+
+<ParamField path="chunk" type="Chunk" required>
+  The parent chunk
+</ParamField>
+
+<ResponseField name="returns" type="List<Instruction>">
+  List of all decoded instructions
+</ResponseField>
+
+## Constant Decoding Methods
+
+### DecodeConstant
+
+```csharp
+public Constant DecodeConstant()
+```
+
+Decodes a single constant value from the bytecode stream.
+
+<ResponseField name="returns" type="Constant">
+  The decoded constant (nil, boolean, number, or string)
+</ResponseField>
+
+**Constant types:**
+- **0**: Nil
+- **1**: Boolean (followed by 1 byte: 0 = false, 1 = true)
+- **3**: Number (followed by 8 bytes: double)
+- **4**: String (followed by size_t length and string data)
+
+### DecodeConstants
+
+```csharp
+public List<Constant> DecodeConstants()
+```
+
+Decodes all constants for a chunk.
+
+<ResponseField name="returns" type="List<Constant>">
+  List of all decoded constants
+</ResponseField>
+
+## Low-Level Reading Methods
+
+### Read
+
+```csharp
+public byte[] Read(int size, bool factorEndianness = true)
+```
+
+Reads raw bytes from the stream, optionally adjusting for endianness.
+
+<ParamField path="size" type="int" required>
+  Number of bytes to read
+</ParamField>
+
+<ParamField path="factorEndianness" type="bool" default="true">
+  Whether to reverse bytes if endianness differs
+</ParamField>
+
+### ReadByte
+
+```csharp
+public byte ReadByte()
+```
+
+Reads a single byte.
+
+### ReadInt32
+
+```csharp
+public int ReadInt32(bool factorEndianness = true)
+```
+
+Reads a 4-byte integer.
+
+### ReadInt64
+
+```csharp
+public long ReadInt64()
+```
+
+Reads an 8-byte integer.
+
+### ReadSizeT
+
+```csharp
+public long ReadSizeT()
+```
+
+Reads a size_t value (4 or 8 bytes depending on bytecode format).
+
+### ReadDouble
+
+```csharp
+public double ReadDouble()
+```
+
+Reads an 8-byte double-precision number.
+
+### ReadString
+
+```csharp
+public string ReadString()
+```
+
+Reads a length-prefixed string using ISO-8859-1 encoding.
+
+## Usage Example
+
+```csharp
+using System.IO;
+using IronBrew2.Bytecode_Library.Bytecode;
+using IronBrew2.Bytecode_Library.IR;
+
+// Read a compiled Lua file
+byte[] bytecode = File.ReadAllBytes("script.luac");
+
+// Deserialize the bytecode
+Deserializer deserializer = new Deserializer(bytecode);
+Chunk mainChunk = deserializer.DecodeFile();
+
+// Access the decoded structure
+Console.WriteLine($"Main function: {mainChunk.Name}");
+Console.WriteLine($"Parameters: {mainChunk.ParameterCount}");
+Console.WriteLine($"Instructions: {mainChunk.Instructions.Count}");
+Console.WriteLine($"Constants: {mainChunk.Constants.Count}");
+
+// Iterate through instructions
+foreach (var instruction in mainChunk.Instructions)
+{
+    Console.WriteLine($"[{instruction.PC}] {instruction.OpCode} A={instruction.A} B={instruction.B} C={instruction.C}");
+}
+
+// Examine constants
+foreach (var constant in mainChunk.Constants)
+{
+    Console.WriteLine($"{constant.Type}: {constant.Data}");
+}
+
+// Process nested functions recursively
+void ProcessChunk(Chunk chunk, int depth = 0)
+{
+    string indent = new string(' ', depth * 2);
+    Console.WriteLine($"{indent}Function: {chunk.Name}");
+    
+    foreach (var nestedChunk in chunk.Functions)
+        ProcessChunk(nestedChunk, depth + 1);
+}
+
+ProcessChunk(mainChunk);
+```
+
+## Bytecode File Format
+
+Lua 5.1 bytecode files have the following structure:
+
+```
+Header (12 bytes)
+├── Signature: 0x1B4C7561 ("\x1bLua")
+├── Version: 0x51 (Lua 5.1)
+├── Format: 0x00 (official)
+├── Endianness: 0x01 (little) or 0x00 (big)
+├── Int size: 4 bytes
+├── Size_t size: 4 or 8 bytes
+├── Instruction size: 4 bytes
+├── Number size: 8 bytes (double)
+└── Integral flag: 0x00 (floating point)
+
+Main Chunk
+└── (Recursive chunk structure)
+```
+
+## See Also
+
+- [Chunk](/api/chunk) - The structure representing a decoded function
+- [Instruction](/api/instruction) - Individual bytecode instructions
+- [Serializer](/api/serializer) - Encode chunks back to bytecode

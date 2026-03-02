@@ -1,0 +1,224 @@
+---
+title: 'Instruction'
+description: 'Represents a single Lua bytecode instruction with operands and references'
+---
+
+The `Instruction` class represents a single Lua VM bytecode instruction, including its opcode, operands, and cross-references to other instructions, constants, and chunks.
+
+## Namespace
+
+```csharp
+IronBrew2.Bytecode_Library.IR
+```
+
+## Properties
+
+<ResponseField name="OpCode" type="Opcode">
+  The operation code specifying what action this instruction performs (e.g., Move, Add, LoadConst, Jmp)
+</ResponseField>
+
+<ResponseField name="InstructionType" type="InstructionType">
+  The instruction encoding type: ABC, ABx, AsBx, AsBxC, or Data
+</ResponseField>
+
+<ResponseField name="ConstantMask" type="InstructionConstantMask">
+  Bitmask indicating which operands reference constants
+</ResponseField>
+
+<ResponseField name="A" type="int">
+  First operand (typically a register index)
+</ResponseField>
+
+<ResponseField name="B" type="int">
+  Second operand (register, constant, or jump offset depending on opcode)
+</ResponseField>
+
+<ResponseField name="C" type="int">
+  Third operand (register, constant, or unused depending on opcode)
+</ResponseField>
+
+<ResponseField name="Data" type="int">
+  Raw instruction data (32-bit encoded instruction)
+</ResponseField>
+
+<ResponseField name="PC" type="int">
+  Program counter (instruction index within the chunk)
+</ResponseField>
+
+<ResponseField name="Line" type="int">
+  Source line number for debugging
+</ResponseField>
+
+<ResponseField name="Chunk" type="Chunk">
+  Reference to the parent chunk containing this instruction
+</ResponseField>
+
+<ResponseField name="RefOperands" type="object[]">
+  Array of 3 object references that operands may point to:
+  - Constants (for LoadConst, GetGlobal, etc.)
+  - Instructions (for Jmp, ForLoop, etc.)
+  - Chunks (for Closure)
+</ResponseField>
+
+<ResponseField name="BackReferences" type="List<Instruction>">
+  List of instructions that reference this instruction (e.g., jump targets)
+</ResponseField>
+
+<ResponseField name="CustomData" type="CustomInstructionData">
+  Custom data used during obfuscation and VM virtualization
+</ResponseField>
+
+## Constructors
+
+### Copy Constructor
+
+```csharp
+public Instruction(Instruction other)
+```
+
+Creates a copy of an existing instruction.
+
+<ParamField path="other" type="Instruction" required>
+  The instruction to copy
+</ParamField>
+
+### Create New Instruction
+
+```csharp
+public Instruction(Chunk chunk, Opcode code, params object[] refOperands)
+```
+
+Creates a new instruction with the specified opcode and reference operands.
+
+<ParamField path="chunk" type="Chunk" required>
+  The parent chunk containing this instruction
+</ParamField>
+
+<ParamField path="code" type="Opcode" required>
+  The operation code for this instruction
+</ParamField>
+
+<ParamField path="refOperands" type="object[]">
+  Variable-length array of reference operands (Constants, Instructions, or Chunks)
+</ParamField>
+
+<Note>
+  The constructor automatically sets up back-references, so instructions or constants referenced in refOperands will have this instruction added to their BackReferences list.
+</Note>
+
+## Methods
+
+### UpdateRegisters
+
+```csharp
+public void UpdateRegisters()
+```
+
+Updates the A, B, C, and PC fields based on RefOperands and the instruction's position in the chunk. This converts high-level references (Constants, Instructions, Chunks) into numeric operand values.
+
+<Tip>
+  Call this method before serializing instructions to bytecode to ensure operands are encoded correctly.
+</Tip>
+
+**Opcode-specific behavior:**
+- **LoadConst, GetGlobal, SetGlobal**: Sets B to the constant's index
+- **Jmp, ForLoop, ForPrep**: Sets B to the relative jump offset
+- **Closure**: Sets B to the nested chunk's index
+- **Arithmetic/Table ops**: Adds 256 to B/C if they reference constants
+
+### SetupRefs
+
+```csharp
+public void SetupRefs()
+```
+
+Converts numeric operand values (A, B, C) back into RefOperands references. This is the inverse of UpdateRegisters and is called after deserializing bytecode.
+
+**Opcode-specific behavior:**
+- **LoadConst, GetGlobal, SetGlobal**: RefOperands[0] = Constants[B]
+- **Jmp, ForLoop, ForPrep**: RefOperands[0] = Instructions[PC + B + 1]
+- **Closure**: RefOperands[0] = Functions[B]
+- **Arithmetic/Table ops**: RefOperands[0/1] = Constants[B/C - 256] if B/C > 255
+
+<Note>
+  SetupRefs also registers back-references, adding this instruction to the BackReferences list of any referenced objects.
+</Note>
+
+## Instruction Types
+
+<ResponseField name="ABC" type="InstructionType">
+  Three operands: A (8 bits), B (9 bits), C (9 bits)
+</ResponseField>
+
+<ResponseField name="ABx" type="InstructionType">
+  Two operands: A (8 bits), Bx (18 bits unsigned)
+</ResponseField>
+
+<ResponseField name="AsBx" type="InstructionType">
+  Two operands: A (8 bits), sBx (18 bits signed)
+</ResponseField>
+
+<ResponseField name="AsBxC" type="InstructionType">
+  Custom type with signed Bx and C operand
+</ResponseField>
+
+<ResponseField name="Data" type="InstructionType">
+  Raw data instruction (used after SetList with C=0)
+</ResponseField>
+
+## Usage Example
+
+```csharp
+using IronBrew2.Bytecode_Library.IR;
+using IronBrew2.Bytecode_Library.Bytecode;
+
+// Create a new instruction
+Chunk chunk = new Chunk();
+Constant strConst = new Constant { Type = ConstantType.String, Data = "Hello" };
+chunk.Constants.Add(strConst);
+
+// LoadConst instruction: load constant into register 0
+Instruction loadInstr = new Instruction(chunk, Opcode.LoadConst, strConst);
+loadInstr.A = 0; // Destination register
+chunk.Instructions.Add(loadInstr);
+
+// Create a jump instruction
+Instruction targetInstr = new Instruction(chunk, Opcode.Return);
+chunk.Instructions.Add(targetInstr);
+
+Instruction jumpInstr = new Instruction(chunk, Opcode.Jmp, targetInstr);
+jumpInstr.A = 0;
+chunk.Instructions.Insert(0, jumpInstr);
+
+// Update mappings and registers before serialization
+chunk.UpdateMappings();
+foreach (var instr in chunk.Instructions)
+    instr.UpdateRegisters();
+
+// Check back-references
+Console.WriteLine($"Target has {targetInstr.BackReferences.Count} jumps to it");
+```
+
+## Working with RefOperands
+
+```csharp
+// Check what an operand references
+if (instruction.RefOperands[0] is Constant constant)
+{
+    Console.WriteLine($"References constant: {constant.Data}");
+}
+else if (instruction.RefOperands[0] is Instruction target)
+{
+    Console.WriteLine($"Jumps to PC: {chunk.InstructionMap[target]}");
+}
+else if (instruction.RefOperands[0] is Chunk function)
+{
+    Console.WriteLine($"Creates closure for: {function.Name}");
+}
+```
+
+## See Also
+
+- [Chunk](/api/chunk) - Container for instructions
+- [Deserializer](/api/deserializer) - Decode instructions from bytecode
+- [Serializer](/api/serializer) - Encode instructions to bytecode

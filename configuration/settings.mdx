@@ -1,0 +1,184 @@
+---
+title: Obfuscation Settings
+description: Complete reference for configuring IronBrew 2 obfuscation settings
+---
+
+The `ObfuscationSettings` class controls all aspects of IronBrew 2's obfuscation behavior. Configure these settings to balance between obfuscation strength and performance.
+
+## Configuration Properties
+
+<ParamField path="EncryptStrings" type="bool" default="false">
+  Enables encryption of all string constants in the Lua script. When enabled, all strings are XOR-encrypted using dynamically generated decryption tables.
+  
+  See [String Encryption](/configuration/encryption) for details.
+</ParamField>
+
+<ParamField path="EncryptImportantStrings" type="bool" default="false">
+  Selectively encrypts strings containing sensitive keywords like "http", "function", "metatable", and "local". More targeted than `EncryptStrings`.
+  
+  See [Important String Encryption](/configuration/encryption#important-strings) for details.
+</ParamField>
+
+<ParamField path="ControlFlow" type="bool" default="true">
+  Enables control flow obfuscation by flattening and complicating the execution flow. Makes reverse engineering significantly harder by obscuring the program's logical structure.
+</ParamField>
+
+<ParamField path="BytecodeCompress" type="bool" default="true">
+  Compresses the virtual machine bytecode to reduce output size. The VM decompresses instructions at runtime.
+</ParamField>
+
+<ParamField path="DecryptTableLen" type="int" default="500">
+  Maximum length of XOR decryption tables used for string encryption. Larger values provide stronger encryption but increase VM size.
+  
+  Used when `EncryptStrings` is enabled. The actual table length may be smaller based on the longest string in your script.
+</ParamField>
+
+<ParamField path="PreserveLineInfo" type="bool" default="false">
+  Preserves original line number information in error messages. Useful for debugging but reveals source structure.
+  
+  <Warning>
+    Enabling this reduces obfuscation effectiveness. Only use during development.
+  </Warning>
+</ParamField>
+
+<ParamField path="Mutate" type="bool" default="true">
+  Enables instruction mutation, which randomizes how bytecode operations are executed while preserving functionality.
+</ParamField>
+
+<ParamField path="MaxMutations" type="int" default="200">
+  Maximum number of instruction mutations to apply. Higher values increase obfuscation strength but may impact performance.
+</ParamField>
+
+<ParamField path="SuperOperators" type="bool" default="true">
+  Enables super operator folding, which combines multiple instructions into single optimized operations.
+  
+  See [Super Operators](/configuration/super-operators) for details.
+</ParamField>
+
+<ParamField path="MaxMiniSuperOperators" type="int" default="120">
+  Maximum number of mini super operators (5-10 instructions) to generate. Mini operators provide good obfuscation with minimal performance impact.
+  
+  See [Super Operators](/configuration/super-operators#mini-operators) for details.
+</ParamField>
+
+<ParamField path="MaxMegaSuperOperators" type="int" default="120">
+  Maximum number of mega super operators (60-80 instructions) to generate. Mega operators provide exceptional obfuscation but may increase VM size.
+  
+  See [Super Operators](/configuration/super-operators#mega-operators) for details.
+</ParamField>
+
+## Usage Example
+
+Here's how to configure obfuscation settings programmatically:
+
+```csharp
+using IronBrew2.Obfuscator;
+
+// Create settings with custom configuration
+var settings = new ObfuscationSettings
+{
+    // Enable string encryption
+    EncryptStrings = true,
+    DecryptTableLen = 750,
+    
+    // Disable line info for production
+    PreserveLineInfo = false,
+    
+    // Enable all obfuscation features
+    ControlFlow = true,
+    Mutate = true,
+    SuperOperators = true,
+    
+    // Increase super operator limits
+    MaxMiniSuperOperators = 150,
+    MaxMegaSuperOperators = 100,
+    
+    // Moderate mutation level
+    MaxMutations = 250
+};
+
+// Use settings with obfuscator
+var obfuscator = new Obfuscator(settings);
+string obfuscated = obfuscator.Obfuscate(luaSource);
+```
+
+## Default Settings
+
+The default constructor initializes settings optimized for balanced obfuscation:
+
+```csharp
+var settings = new ObfuscationSettings();
+// EncryptStrings: false
+// EncryptImportantStrings: false
+// ControlFlow: true
+// BytecodeCompress: true
+// DecryptTableLen: 500
+// PreserveLineInfo: false
+// Mutate: true
+// SuperOperators: true
+// MaxMegaSuperOperators: 120
+// MaxMiniSuperOperators: 120
+// MaxMutations: 200
+```
+
+## Configuration Strategies
+
+<Tabs>
+  <Tab title="Maximum Protection">
+    Use when security is the top priority:
+    
+    ```csharp
+    var settings = new ObfuscationSettings
+    {
+        EncryptStrings = true,
+        EncryptImportantStrings = true,
+        DecryptTableLen = 1000,
+        ControlFlow = true,
+        Mutate = true,
+        SuperOperators = true,
+        MaxMiniSuperOperators = 200,
+        MaxMegaSuperOperators = 150,
+        MaxMutations = 300,
+        PreserveLineInfo = false
+    };
+    ```
+  </Tab>
+  
+  <Tab title="Balanced">
+    Default settings provide good protection with reasonable performance:
+    
+    ```csharp
+    var settings = new ObfuscationSettings();
+    // Uses defaults
+    ```
+  </Tab>
+  
+  <Tab title="Development">
+    Lighter obfuscation for faster iteration:
+    
+    ```csharp
+    var settings = new ObfuscationSettings
+    {
+        EncryptStrings = false,
+        ControlFlow = true,
+        Mutate = false,
+        SuperOperators = false,
+        PreserveLineInfo = true  // Enable error line numbers
+    };
+    ```
+  </Tab>
+</Tabs>
+
+## Performance Considerations
+
+Different settings have varying performance impacts:
+
+- **Low Impact**: `ControlFlow`, `BytecodeCompress`, `PreserveLineInfo`
+- **Moderate Impact**: `Mutate`, `MaxMiniSuperOperators`
+- **Higher Impact**: `EncryptStrings`, `MaxMegaSuperOperators`, high `MaxMutations`
+
+For performance-critical applications, start with defaults and increase settings incrementally while testing runtime performance.
+
+## Source Reference
+
+Settings are defined in: `IronBrew2/Obfuscator/ObfuscationSettings.cs:3`

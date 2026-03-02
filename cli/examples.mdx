@@ -1,0 +1,391 @@
+---
+title: 'Usage Examples'
+description: 'Real-world examples of using IronBrew 2 CLI'
+---
+
+## Basic Obfuscation
+
+The simplest way to obfuscate a Lua script:
+
+```bash
+IronBrew2.exe myscript.lua
+```
+
+**Input** (`myscript.lua`):
+```lua
+local function greet(name)
+    print("Hello, " .. name .. "!")
+end
+
+greet("World")
+```
+
+**Output** (`out.lua`):
+A heavily obfuscated script with the IronBrew watermark header, VM-based execution, and minified code.
+
+## Real-World Scenarios
+
+### Protecting a Game Script
+
+Obfuscate a game script to prevent cheating:
+
+```bash
+IronBrew2.exe game_logic.lua
+```
+
+```
+Checking file...
+Stripping comments...
+Compiling...
+Obfuscating...
+Serializing...
+Minifying...
+Watermark...
+Done!
+```
+
+The output `out.lua` can then be deployed with your game.
+
+### Batch Processing Scripts
+
+Process multiple scripts in a batch (Windows):
+
+```batch
+@echo off
+for %%f in (*.lua) do (
+    echo Processing %%f...
+    IronBrew2.exe %%f
+    move /Y out.lua obfuscated_%%f
+)
+```
+
+This processes all `.lua` files in the current directory and saves outputs with the `obfuscated_` prefix.
+
+### Batch Processing (Linux/macOS)
+
+```bash
+#!/bin/bash
+for file in *.lua; do
+    echo "Processing $file..."
+    IronBrew2.exe "$file"
+    mv out.lua "obfuscated_$file"
+done
+```
+
+## Integration Examples
+
+### Build Pipeline Integration
+
+Integrate IronBrew 2 into your build process:
+
+```batch
+@echo off
+REM Build script for releasing game
+
+echo Building game assets...
+call build_assets.bat
+
+echo Obfuscating main script...
+IronBrew2.exe src\main.lua
+move /Y out.lua release\main.lua
+
+echo Obfuscating modules...
+for %%m in (src\modules\*.lua) do (
+    IronBrew2.exe %%m
+    move /Y out.lua release\modules\%%~nxm
+)
+
+echo Build complete!
+```
+
+### Automated Testing
+
+Verify obfuscated code works correctly:
+
+```bash
+#!/bin/bash
+
+echo "Obfuscating test script..."
+IronBrew2.exe test_script.lua
+
+echo "Running obfuscated script..."
+lua out.lua > output.txt
+
+echo "Running original script..."
+lua test_script.lua > expected.txt
+
+if diff output.txt expected.txt > /dev/null; then
+    echo "Test passed! Output matches."
+else
+    echo "Test failed! Output differs."
+    exit 1
+fi
+```
+
+## Working with Paths
+
+### Relative Paths
+
+```bash
+IronBrew2.exe scripts/player.lua
+```
+
+### Absolute Paths
+
+```bash
+IronBrew2.exe C:\Projects\MyGame\src\main.lua
+```
+
+### Paths with Spaces
+
+Use quotes for paths containing spaces:
+
+```bash
+IronBrew2.exe "C:\My Projects\Game Scripts\main.lua"
+```
+
+## Error Handling Examples
+
+### Invalid File Path
+
+```bash
+IronBrew2.exe nonexistent.lua
+```
+
+```
+ERR: Invalid input file.
+```
+
+### Syntax Error in Script
+
+If your input script has syntax errors:
+
+```bash
+IronBrew2.exe broken.lua
+```
+
+```
+Checking file...
+ERR: luac: broken.lua:5: '=' expected near 'function'
+```
+
+Fix the syntax errors before obfuscating:
+
+```lua
+-- broken.lua (line 5)
+local function test  -- Missing parentheses
+    print("test")
+end
+
+-- Fixed:
+local function test()
+    print("test")
+end
+```
+
+## Advanced Workflow
+
+### Pre-processing Script
+
+Combine multiple modules before obfuscation:
+
+```bash
+#!/bin/bash
+
+# Combine modules into single file
+cat modules/init.lua > combined.lua
+cat modules/utils.lua >> combined.lua
+cat modules/main.lua >> combined.lua
+
+# Obfuscate combined file
+IronBrew2.exe combined.lua
+
+# Deploy
+cp out.lua deployment/app.lua
+
+echo "Deployment ready!"
+```
+
+### Version Stamping
+
+Add version information before obfuscation:
+
+```bash
+#!/bin/bash
+
+VERSION="1.0.0"
+DATE=$(date +"%Y-%m-%d")
+
+# Add version header
+echo "-- Version: $VERSION" > versioned.lua
+echo "-- Built: $DATE" >> versioned.lua
+cat original.lua >> versioned.lua
+
+# Obfuscate
+IronBrew2.exe versioned.lua
+mv out.lua release/app_v${VERSION}.lua
+
+echo "Created release/app_v${VERSION}.lua"
+```
+
+## CI/CD Integration
+
+### GitHub Actions Example
+
+```yaml
+name: Build and Obfuscate
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  obfuscate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Install Lua
+        run: choco install lua
+      
+      - name: Obfuscate Scripts
+        run: |
+          IronBrew2.exe src/main.lua
+          Move-Item out.lua release/main.lua
+      
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: obfuscated-scripts
+          path: release/
+```
+
+### Jenkins Pipeline
+
+```groovy
+pipeline {
+    agent any
+    
+    stages {
+        stage('Obfuscate') {
+            steps {
+                bat 'IronBrew2.exe src\\main.lua'
+                bat 'move out.lua release\\main.lua'
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                bat 'lua release\\main.lua'
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+                // Deploy release/ contents
+                echo 'Deploying obfuscated scripts...'
+            }
+        }
+    }
+}
+```
+
+## Common Patterns
+
+### Preserve Original Files
+
+Keep originals while creating obfuscated versions:
+
+```bash
+#!/bin/bash
+
+mkdir -p obfuscated
+
+for script in src/*.lua; do
+    filename=$(basename "$script")
+    echo "Processing $filename..."
+    
+    IronBrew2.exe "$script"
+    mv out.lua "obfuscated/$filename"
+done
+
+echo "Originals preserved in src/"
+echo "Obfuscated versions in obfuscated/"
+```
+
+### Conditional Obfuscation
+
+Only obfuscate for production builds:
+
+```bash
+#!/bin/bash
+
+ENV=${1:-development}
+
+if [ "$ENV" = "production" ]; then
+    echo "Production build - obfuscating..."
+    IronBrew2.exe src/main.lua
+    cp out.lua dist/main.lua
+else
+    echo "Development build - copying original..."
+    cp src/main.lua dist/main.lua
+fi
+```
+
+Usage:
+```bash
+./build.sh development  # Uses original
+./build.sh production   # Uses obfuscated
+```
+
+## Troubleshooting
+
+### Missing Dependencies
+
+If you see errors about `luac` or `luajit` not found:
+
+**Windows:**
+```bash
+# Add Lua to PATH or install with chocolatey
+choco install lua
+```
+
+**Linux:**
+```bash
+sudo apt-get install lua5.1 luajit
+```
+
+### Permission Denied
+
+If you can't write `out.lua`:
+
+```bash
+# Check permissions
+ls -la out.lua
+
+# Remove read-only attribute (Windows)
+attrib -r out.lua
+
+# Fix permissions (Linux)
+chmod 644 out.lua
+```
+
+### Large Files
+
+For very large scripts, obfuscation may take time:
+
+```bash
+time IronBrew2.exe large_script.lua
+```
+
+Monitor progress through console output:
+```
+Checking file...
+Stripping comments...
+Compiling...
+Obfuscating...  # May take longer for large files
+Serializing...
+Minifying...
+Watermark...
+Done!
+```

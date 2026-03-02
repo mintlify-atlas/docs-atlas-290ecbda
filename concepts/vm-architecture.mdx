@@ -1,0 +1,220 @@
+---
+title: VM Architecture
+description: Understanding IronBrew 2's virtual machine-based obfuscation system
+---
+
+## Overview
+
+IronBrew 2 implements a **virtual machine (VM) based obfuscation** approach that transforms standard Lua 5.1 bytecode into a custom VM that executes the code at runtime. This makes reverse engineering significantly more difficult, as the original Lua opcodes are replaced with custom virtual instructions.
+
+## How VM-Based Obfuscation Works
+
+### The Transformation Pipeline
+
+```
+Lua Source → Lua 5.1 Bytecode → Custom VM Instructions → Obfuscated Output
+```
+
+1. **Deserialization**: Lua bytecode is deserialized into an intermediate representation (IR)
+2. **Virtual Opcode Mapping**: Each standard Lua opcode is mapped to a custom virtual opcode (VOpcode)
+3. **VM Generation**: A custom Lua VM is generated that can execute these virtual opcodes
+4. **Serialization**: The modified bytecode is serialized and embedded into the VM
+
+## VM Generation Process
+
+The VM generation is handled by the `Generator` class (Generator.cs:15).
+
+### Virtual Opcode Discovery
+
+The generator discovers all virtual opcodes needed for the chunk:
+
+```csharp
+// Generator.cs:357-362
+List<VOpcode> virtuals = Assembly.GetExecutingAssembly().GetTypes()
+    .Where(t => t.IsSubclassOf(typeof(VOpcode)))
+    .Select(Activator.CreateInstance)
+    .Cast<VOpcode>()
+    .Where(t => IsUsed(_context.HeadChunk, t))
+    .ToList();
+```
+
+This code:
+- Scans all types that inherit from `VOpcode`
+- Checks which opcodes are actually used in the bytecode (Generator.cs:22)
+- Creates instances only for used opcodes to minimize VM size
+
+### Instruction Mapping
+
+When an opcode is detected as used, it's mapped:
+
+```csharp
+// Generator.cs:28-31
+if (!_context.InstructionMapping.ContainsKey(ins.OpCode))
+    _context.InstructionMapping.Add(ins.OpCode, virt);
+
+ins.CustomData = new CustomInstructionData {Opcode = virt};
+```
+
+Each `Instruction` gets a `CustomData` field that stores the virtual opcode mapping.
+
+## VM Structure
+
+The generated VM consists of several components:
+
+### 1. Bytecode Embedding
+
+The serialized bytecode is embedded as a string (Generator.cs:411-444):
+
+```lua
+-- Compressed version
+local ByteString = decompress('...');
+
+-- Or uncompressed
+ByteString = '\\001\\002\\003...';
+```
+
+Bytecode can be optionally compressed using LZW compression (Generator.cs:41-72).
+
+### 2. Deserializer Function
+
+A custom deserializer is generated that reads the bytecode format (Generator.cs:459-518):
+
+```lua
+for Idx=1,gBits32() do 
+    local Descriptor = gBits8();
+    if (gBit(Descriptor, 1, 1) == 0) then
+        local Type = gBit(Descriptor, 2, 3);
+        local Mask = gBit(Descriptor, 4, 6);
+        
+        local Inst = {
+            gBits16(),  -- Opcode
+            gBits16(),  -- Register A
+            nil,        -- Operand B
+            nil         -- Operand C
+        };
+        
+        -- Decode based on instruction type
+        if (Type == 0) then 
+            Inst[OP_B] = gBits16(); 
+            Inst[OP_C] = gBits16();
+        elseif(Type==1) then 
+            Inst[OP_B] = gBits32();
+        -- ... more types
+        end;
+    end
+end;
+```
+
+### 3. VM Executor
+
+The VM executor uses binary search for opcode dispatch (Generator.cs:547-583):
+
+```csharp
+// Binary search tree generation
+if (opcodes.Count == 1)
+    str += $"{virtuals[opcodes[0]].GetObfuscated(_context)}";
+else if (opcodes.Count == 2) {
+    str += $"if Enum > {virtuals[opcodes[0]].VIndex} then {virtuals[opcodes[1]].GetObfuscated(_context)}";
+    str += $"else {virtuals[opcodes[0]].GetObfuscated(_context)}";
+    str += "end;";
+}
+else {
+    // Recursive binary search for larger opcode sets
+}
+```
+
+This creates an efficient dispatch mechanism:
+
+```lua
+if Enum <= 45 then 
+    if Enum <= 22 then
+        -- Execute opcode 0-22
+    else
+        -- Execute opcode 23-45
+    end
+else
+    -- Execute opcode 46+
+end
+```
+
+## Obfuscation Context
+
+The `ObfuscationContext` (ObfuscationContext.cs:37) manages the obfuscation state:
+
+### Random Ordering
+
+Chunk steps and constant types are shuffled (ObfuscationContext.cs:55-65):
+
+```csharp
+ChunkSteps = Enumerable.Range(0, (int) ChunkStep.StepCount)
+    .Select(i => (ChunkStep) i)
+    .ToArray();
+ChunkSteps.Shuffle();
+
+ConstantMapping = Enumerable.Range(0, 4).ToArray();
+ConstantMapping.Shuffle();
+```
+
+This randomizes:
+- The order in which chunk data is deserialized
+- How constant types are encoded (nil, boolean, number, string)
+
+### XOR Encryption
+
+Bytecode is XOR-encrypted with random keys (ObfuscationContext.cs:67-71):
+
+```csharp
+Random rand = new Random();
+PrimaryXorKey = rand.Next(0, 256);
+IXorKey1 = rand.Next(0, 256);
+IXorKey2 = rand.Next(0, 256);
+```
+
+During serialization (Serializer.cs:29-30):
+
+```csharp
+if (factorXor)
+    b ^= (byte)(_context.PrimaryXorKey);
+```
+
+## Execution Flow
+
+When obfuscated code runs:
+
+1. **VM Initialization**: The VM deserializes the embedded bytecode
+2. **Chunk Loading**: Creates chunk structures with instructions, constants, and functions
+3. **Instruction Dispatch**: Binary search finds the correct opcode handler
+4. **Execution**: The custom opcode implementation executes the operation
+5. **Stack Management**: Maintains Lua stack state across operations
+
+## Key Design Decisions
+
+### Only Used Opcodes
+
+The VM only includes opcodes that are actually used in the bytecode (Generator.cs:22-38). This:
+- Reduces VM size
+- Makes analysis harder (fewer patterns to recognize)
+- Improves performance
+
+### Binary Search Dispatch
+
+Instead of a simple if-else chain or table lookup, binary search is used (Generator.cs:547-583). This:
+- Provides O(log n) opcode lookup
+- Obscures the dispatch mechanism
+- Balances performance and obfuscation
+
+### Randomized Structure
+
+Every obfuscation produces a different VM:
+- Chunk step order is randomized
+- Constant type mapping is randomized
+- Opcode indices are shuffled (Generator.cs:404)
+- XOR keys are random
+
+This prevents signature-based deobfuscation.
+
+## Related Topics
+
+- [Bytecode](/concepts/bytecode) - Understanding the bytecode format
+- [Obfuscation Techniques](/concepts/obfuscation-techniques) - Additional obfuscation layers
+- [Control Flow](/concepts/control-flow) - Control flow obfuscation

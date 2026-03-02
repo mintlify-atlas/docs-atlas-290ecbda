@@ -1,0 +1,131 @@
+---
+title: IB2
+description: Main entry point for the IronBrew 2 obfuscation engine
+---
+
+The `IB2` static class provides the core obfuscation functionality for IronBrew 2. It handles the complete obfuscation pipeline from input Lua script to obfuscated output.
+
+## Static Fields
+
+<ResponseField name="Random" type="System.Random">
+  Shared random number generator instance used throughout the obfuscation process
+</ResponseField>
+
+## Methods
+
+### Obfuscate
+
+Obfuscates a Lua script file with the specified settings.
+
+```csharp
+public static bool Obfuscate(
+    string path, 
+    string input, 
+    ObfuscationSettings settings, 
+    out string error
+)
+```
+
+<ParamField path="path" type="string" required>
+  Working directory path for temporary files during obfuscation. The directory must exist before calling this method.
+</ParamField>
+
+<ParamField path="input" type="string" required>
+  Absolute path to the input Lua script file to obfuscate. The file must exist and be a valid Lua script.
+</ParamField>
+
+<ParamField path="settings" type="ObfuscationSettings" required>
+  Configuration object controlling obfuscation behavior. See [ObfuscationSettings](/api/obfuscation-settings) for details.
+</ParamField>
+
+<ParamField path="error" type="string" required>
+  Output parameter that receives error messages if obfuscation fails. Empty string on success.
+</ParamField>
+
+<ResponseField name="Return Value" type="bool">
+  Returns `true` if obfuscation succeeded, `false` if it failed. Check the `error` parameter for failure details.
+</ResponseField>
+
+## Obfuscation Pipeline
+
+The `Obfuscate` method executes the following steps:
+
+1. **File Validation** - Verifies input file exists and is valid Lua syntax using `luac`
+2. **Comment Stripping** - Removes comments using LuaSrcDiet while preserving code
+3. **String Encryption** - Encrypts string constants if enabled in settings
+4. **Compilation** - Compiles to Lua bytecode using `luac`
+5. **Control Flow** - Applies control flow obfuscation if enabled
+6. **VM Generation** - Generates custom virtual machine interpreter
+7. **Minification** - Minifies the output using LuaSrcDiet with maximum compression
+8. **Watermark** - Adds IronBrew 2 watermark and writes final output to `out.lua`
+
+## Temporary Files
+
+The method creates several temporary files in the working directory:
+
+- `luac.out` - Compiled bytecode
+- `t0.lua` - Comments stripped
+- `t1.lua` - String encrypted
+- `t2.lua` - VM generated
+- `t3.lua` - Minified output
+- `out.lua` - Final obfuscated script with watermark
+
+## Error Handling
+
+The method catches all exceptions and returns error details through the `error` parameter. Common errors include:
+
+- Invalid input file path
+- Lua syntax errors in input
+- Missing `luac` or `luajit` executables
+- Insufficient permissions for temporary directory
+
+## Platform Support
+
+The method automatically detects the operating system:
+- **Unix/Linux**: Uses `/usr/bin/luac` and `/usr/bin/luajit`
+- **Windows**: Uses `luac` and `luajit` from PATH
+
+## Usage Example
+
+```csharp
+using IronBrew2;
+using IronBrew2.Obfuscator;
+using System.IO;
+
+// Create working directory
+if (Directory.Exists("temp"))
+    Directory.Delete("temp", true);
+Directory.CreateDirectory("temp");
+
+// Configure obfuscation settings
+var settings = new ObfuscationSettings()
+{
+    ControlFlow = true,
+    BytecodeCompress = true,
+    Mutate = true,
+    SuperOperators = true
+};
+
+// Obfuscate the script
+if (!IB2.Obfuscate("temp", "script.lua", settings, out string error))
+{
+    Console.WriteLine("Obfuscation failed: " + error);
+    return;
+}
+
+// Move output to final location
+File.Move("temp/out.lua", "obfuscated.lua");
+Console.WriteLine("Obfuscation complete!");
+```
+
+<Note>
+The method requires `luac` and `luajit` to be installed and available in the system PATH or `/usr/bin/` directory.
+</Note>
+
+<Warning>
+The working directory will contain sensitive intermediate files during obfuscation. Ensure proper cleanup and security measures.
+</Warning>
+
+## Source Reference
+
+Source: `IronBrew2/Program.cs:20`

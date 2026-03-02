@@ -1,0 +1,242 @@
+---
+title: Installation
+description: Install and configure IronBrew 2 on your system
+---
+
+# Installation
+
+Get IronBrew 2 up and running on your system. This guide covers all prerequisites and platform-specific setup steps.
+
+## Prerequisites
+
+Before installing IronBrew 2, ensure you have the following dependencies:
+
+### Required Dependencies
+
+<CardGroup cols={2}>
+  <Card title=".NET Core 3.1+" icon="code">
+    Required to build and run the IronBrew 2 CLI
+  </Card>
+  <Card title="luac (Lua 5.1)" icon="moon">
+    Lua 5.1 compiler for bytecode generation
+  </Card>
+  <Card title="LuaJIT" icon="bolt">
+    Required for the LuaSrcDiet minifier
+  </Card>
+  <Card title="Git" icon="github">
+    For cloning the repository
+  </Card>
+</CardGroup>
+
+### Platform-Specific Requirements
+
+<CodeGroup>
+
+```bash Ubuntu/Debian
+# Install .NET Core 3.1 SDK
+wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+sudo dpkg -i packages-microsoft-prod.deb
+sudo apt-get update
+sudo apt-get install -y dotnet-sdk-3.1
+
+# Install Lua 5.1 and LuaJIT
+sudo apt-get install -y lua5.1 luajit
+```
+
+```bash macOS
+# Install .NET Core 3.1 SDK
+brew install --cask dotnet-sdk
+
+# Install Lua 5.1 and LuaJIT
+brew install lua@5.1 luajit
+```
+
+```powershell Windows
+# Install .NET Core 3.1 SDK
+# Download from: https://dotnet.microsoft.com/download/dotnet/3.1
+
+# Install Lua 5.1 and LuaJIT
+# Option 1: Use Chocolatey
+choco install lua lua.install luajit
+
+# Option 2: Download binaries manually
+# Lua 5.1: https://sourceforge.net/projects/luabinaries/
+# LuaJIT: https://luajit.org/download.html
+```
+
+</CodeGroup>
+
+<Warning>
+  IronBrew 2 requires **Lua 5.1** specifically. Lua 5.2, 5.3, or 5.4 will not work correctly. Make sure `luac` and `luajit` point to Lua 5.1 versions.
+</Warning>
+
+## Installation Steps
+
+<Steps>
+  <Step title="Verify Prerequisites">
+    Confirm all required tools are installed and accessible:
+
+    ```bash
+    # Check .NET Core version
+    dotnet --version
+    # Should output 3.1.x or higher
+
+    # Check Lua version
+    luac -v
+    # Should output: Lua 5.1.x
+
+    # Check LuaJIT version
+    luajit -v
+    # Should output: LuaJIT 2.x.x
+    ```
+
+    <Note>
+      On Unix systems (Linux/macOS), IronBrew 2 looks for executables at `/usr/bin/luac` and `/usr/bin/luajit`. On Windows, they should be in your PATH.
+    </Note>
+  </Step>
+
+  <Step title="Clone the Repository">
+    Clone the IronBrew 2 source code:
+
+    ```bash
+    git clone https://github.com/yourusername/ironbrew2.git
+    cd ironbrew2
+    ```
+  </Step>
+
+  <Step title="Build the Project">
+    Build IronBrew 2 using the .NET CLI:
+
+    ```bash
+    cd "IronBrew2 CLI"
+    dotnet build -c Release
+    ```
+
+    The compiled executable will be located at:
+    ```
+    IronBrew2 CLI/bin/Release/netcoreapp3.1/
+    ```
+  </Step>
+
+  <Step title="Verify Installation">
+    Test that IronBrew 2 is working correctly:
+
+    ```bash
+    # Create a simple test file
+    echo 'print("Hello, IronBrew!")' > test.lua
+
+    # Run IronBrew 2
+    dotnet run test.lua
+    ```
+
+    You should see output like:
+    ```
+    Checking file...
+    Stripping comments...
+    Compiling...
+    Obfuscating...
+    Serializing...
+    Minifying...
+    Watermark...
+    Done!
+    ```
+
+    The obfuscated output will be saved to `out.lua`.
+  </Step>
+
+  <Step title="(Optional) Create an Alias">
+    For easier access, create a command alias:
+
+    <CodeGroup>
+
+    ```bash Linux/macOS
+    # Add to ~/.bashrc or ~/.zshrc
+    echo 'alias ironbrew2="dotnet /path/to/IronBrew2\ CLI/bin/Release/netcoreapp3.1/IronBrew2\ CLI.dll"' >> ~/.bashrc
+    source ~/.bashrc
+
+    # Now you can run:
+    ironbrew2 script.lua
+    ```
+
+    ```powershell Windows PowerShell
+    # Add to $PROFILE
+    function ironbrew2 { dotnet "C:\path\to\IronBrew2 CLI\bin\Release\netcoreapp3.1\IronBrew2 CLI.dll" $args }
+
+    # Now you can run:
+    ironbrew2 script.lua
+    ```
+
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Project Structure
+
+After cloning the repository, you'll find:
+
+```
+ironbrew2/
+├── IronBrew2/              # Core obfuscation library
+│   ├── Obfuscator/         # Obfuscation engine
+│   │   ├── Control Flow/   # Control flow obfuscation
+│   │   ├── Encryption/     # String and constant encryption
+│   │   ├── Opcodes/        # VM opcode implementations
+│   │   └── VM Generation/  # VM generator
+│   └── Bytecode Library/   # Lua bytecode parser
+├── IronBrew2 CLI/          # Command-line interface
+├── Lua/                    # LuaSrcDiet minifier
+│   └── Minifier/
+└── Tests/                  # Test Lua scripts
+```
+
+## Troubleshooting
+
+### "luac: command not found" or "luajit: command not found"
+
+Ensure Lua 5.1 and LuaJIT are installed and in your PATH:
+
+```bash
+# Linux/macOS
+which luac
+which luajit
+
+# Windows
+where luac
+where luajit
+```
+
+If not found, install them or add their installation directory to your PATH.
+
+### "Invalid input file" error
+
+Ensure:
+1. The input file exists and is a valid Lua script
+2. The file path is correct
+3. The Lua code is compatible with Lua 5.1
+
+### Build errors with .NET
+
+Make sure you have .NET Core 3.1 SDK (not just runtime):
+
+```bash
+dotnet --list-sdks
+```
+
+If 3.1.x is not listed, install the SDK from [Microsoft's website](https://dotnet.microsoft.com/download/dotnet/3.1).
+
+### Path issues on Unix systems
+
+IronBrew 2 automatically detects Unix systems and prepends `/usr/bin/` to `luac` and `luajit` commands. If your executables are elsewhere, you may need to create symlinks:
+
+```bash
+sudo ln -s /path/to/luac /usr/bin/luac
+sudo ln -s /path/to/luajit /usr/bin/luajit
+```
+
+## Next Steps
+
+Now that IronBrew 2 is installed, you're ready to obfuscate your first script!
+
+<Card title="Quick Start Guide" icon="rocket" href="/quickstart">
+  Learn how to obfuscate your first Lua script
+</Card>

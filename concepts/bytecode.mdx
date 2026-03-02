@@ -1,0 +1,424 @@
+---
+title: Bytecode Structure
+description: Deep dive into Lua 5.1 bytecode format and IronBrew's manipulation
+---
+
+## Overview
+
+IronBrew 2 works with **Lua 5.1 bytecode**, the compiled format of Lua scripts. Understanding this bytecode structure is essential for understanding how IronBrew transforms and obfuscates code.
+
+## Lua 5.1 Bytecode Format
+
+### File Header
+
+Lua bytecode files start with a header (Deserializer.cs:264-289):
+
+```
+Header:
+  - Magic Number: 0x1B4C7561 ("\x1BLua")
+  - Version: 0x51 (Lua 5.1)
+  - Format: 0 (official)
+  - Endianness: 0 = big endian, 1 = little endian
+  - Size of int: 4 bytes
+  - Size of size_t: 4 or 8 bytes
+  - Size of instruction: 4 bytes
+  - Size of number: 8 bytes (double)
+  - Integral flag: 0 = floating point
+```
+
+The deserializer validates these:
+
+```csharp
+// Deserializer.cs:265-268
+int header = ReadInt32();
+if (header != 0x1B4C7561 && header != 0x61754C1B)
+    throw new Exception("Invalid luac file.");
+    
+if (ReadByte() != 0x51)
+    throw new Exception("Only Lua 5.1 is supported.");
+```
+
+## Instruction Format
+
+Lua instructions are 32-bit values with different formats (Deserializer.cs:111-150).
+
+### Instruction Types
+
+Defined in Enums.cs:13-20:
+
+```csharp
+public enum InstructionType
+{
+    ABC,   // Standard 3-operand format
+    ABx,   // Large second operand
+    AsBx,  // Large signed second operand
+    AsBxC, // Signed B with C operand (custom)
+    Data   // Raw data (for SetList)
+}
+```
+
+### Bit Layout
+
+**ABC Format** (most common):
+```
+┌─────────┬─────────┬─────────┬────────┐
+│ OP (6)  │  A (8)  │  C (9)  │ B (9)  │
+└─────────┴─────────┴─────────┴────────┘
+  0-5      6-13     14-22    23-31
+```
+
+**ABx Format** (for constants, globals):
+```
+┌─────────┬─────────┬───────────────────┐
+│ OP (6)  │  A (8)  │     Bx (18)       │
+└─────────┴─────────┴───────────────────┘
+  0-5      6-13         14-31
+```
+
+**AsBx Format** (for jumps):
+```
+┌─────────┬─────────┬───────────────────┐
+│ OP (6)  │  A (8)  │    sBx (18)       │
+└─────────┴─────────┴───────────────────┘
+  0-5      6-13         14-31
+             (signed, offset by 131071)
+```
+
+### Decoding Instructions
+
+The deserializer decodes instructions (Deserializer.cs:111-151):
+
+```csharp
+public Instruction DecodeInstruction(Chunk chunk, int index)
+{
+    int code = ReadInt32();
+    Instruction i = new Instruction(chunk, (Opcode)(code & 0x3F));
+    
+    i.Data = code;
+    i.A = (code >> 6) & 0xFF;
+
+    switch (i.InstructionType)
+    {
+        case InstructionType.ABC:
+            i.B = (code >> 6 + 8 + 9) & 0x1FF;  // Bits 23-31
+            i.C = (code >> 6 + 8) & 0x1FF;      // Bits 14-22
+            break;
+        
+        case InstructionType.ABx:
+            i.B = (code >> 6 + 8) & 0x3FFFF;    // Bits 14-31
+            i.C = -1;
+            break;
+        
+        case InstructionType.AsBx:
+            i.B = ((code >> 6 + 8) & 0x3FFFF) - 131071;  // Signed
+            i.C = -1;
+            break;
+    }
+    
+    return i;
+}
+```
+
+## Opcode Reference
+
+Lua 5.1 defines 38 standard opcodes (Opcode.cs:3-42):
+
+### Stack Operations
+- `Move`: Copy value between registers
+- `LoadConst`: Load constant from constant table
+- `LoadBool`: Load boolean value
+- `LoadNil`: Load nil values
+
+### Global and Upvalue Operations
+- `GetGlobal`: Get global variable
+- `SetGlobal`: Set global variable
+- `GetUpval`: Get upvalue
+- `SetUpval`: Set upvalue
+
+### Table Operations
+- `NewTable`: Create new table
+- `GetTable`: Get table value
+- `SetTable`: Set table value
+- `SetList`: Set table list values
+- `Self`: Prepare method call
+
+### Arithmetic Operations
+- `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Pow`: Binary operations
+- `Unm`: Unary minus
+- `Len`: Length operator
+- `Concat`: String concatenation
+
+### Logical Operations
+- `Not`: Logical NOT
+- `Eq`, `Lt`, `Le`: Comparisons (equal, less than, less or equal)
+
+### Control Flow
+- `Jmp`: Unconditional jump
+- `Test`: Test value
+- `TestSet`: Test and set
+- `ForLoop`, `ForPrep`: Numeric for loop
+- `TForLoop`: Generic for loop
+
+### Function Operations
+- `Call`: Function call
+- `TailCall`: Tail call
+- `Return`: Return from function
+- `Closure`: Create closure
+- `VarArg`: Variable arguments
+- `Close`: Close upvalues
+
+### Custom VM Opcodes
+
+IronBrew adds custom opcodes (Opcode.cs:44-48):
+
+- `SetTop`: Set stack top
+- `PushStack`: Push to stack
+- `NewStack`: Create new stack frame
+- `SetFenv`: Set function environment
+
+## Instruction Reference System
+
+Instructions can reference:
+
+### Constants
+
+Operands >= 256 reference constants (Instruction.cs:143-147):
+
+```csharp
+if (B > 255)
+    RefOperands[0] = Chunk.Constants[B - 256];
+
+if (C > 255)
+    RefOperands[1] = Chunk.Constants[C - 256];
+```
+
+### Jump Targets
+
+Jump instructions reference other instructions (Instruction.cs:124-126):
+
+```csharp
+case Opcode.Jmp:
+case Opcode.ForLoop:
+case Opcode.ForPrep:
+    RefOperands[0] = Chunk.Instructions[Chunk.InstructionMap[this] + B + 1];
+```
+
+### Back References
+
+Instructions track what references them (Instruction.cs:64-65):
+
+```csharp
+if (op is Instruction ins)
+    ins.BackReferences.Add(this);
+```
+
+This is crucial for control flow transformations.
+
+## Constant Table
+
+Chunks contain a constant table (Deserializer.cs:165-206).
+
+### Constant Types
+
+Defined in Enums.cs:5-11:
+
+```csharp
+public enum ConstantType
+{
+    Nil,      // Type 0
+    Boolean,  // Type 1  
+    Number,   // Type 3 (skips type 2)
+    String    // Type 4
+}
+```
+
+### Constant Encoding
+
+Constants are encoded with a type byte:
+
+```csharp
+// Deserializer.cs:168-191
+byte Type = ReadByte();
+switch (Type)
+{
+    case 0:
+        c.Type = ConstantType.Nil;
+        c.Data = null;
+        break;
+    
+    case 1:
+        c.Type = ConstantType.Boolean;
+        c.Data = ReadByte() != 0;
+        break;
+    
+    case 3:
+        c.Type = ConstantType.Number;
+        c.Data = ReadDouble();
+        break;
+    
+    case 4:
+        c.Type = ConstantType.String;
+        c.Data = ReadString();
+        break;
+}
+```
+
+## Chunk Structure
+
+A chunk represents a function (Chunk.cs:6-23):
+
+```csharp
+public class Chunk
+{
+    public string Name;                 // Function name
+    public int Line, LastLine;          // Debug info
+    public byte UpvalueCount;           // Number of upvalues
+    public byte ParameterCount;         // Number of parameters
+    public byte VarargFlag;             // Vararg flag
+    public byte StackSize;              // Stack size needed
+    
+    public List<Instruction> Instructions;   // Bytecode
+    public List<Constant> Constants;         // Constant table
+    public List<Chunk> Functions;            // Nested functions
+    public List<string> Upvalues;            // Upvalue names
+}
+```
+
+### Chunk Deserialization
+
+Chunks are recursively deserialized (Deserializer.cs:208-249):
+
+```csharp
+public Chunk DecodeChunk()
+{
+    Chunk c = new Chunk {
+        Name           = ReadString(),
+        Line           = ReadInt32(),
+        LastLine       = ReadInt32(),
+        UpvalueCount   = ReadByte(),
+        ParameterCount = ReadByte(),
+        VarargFlag     = ReadByte(),
+        StackSize      = ReadByte()
+    };
+    
+    c.Instructions = DecodeInstructions(c);
+    c.Constants = DecodeConstants();
+    c.Functions = DecodeChunks();  // Recursive
+    
+    // ... debug info ...
+    
+    return c;
+}
+```
+
+## IronBrew Serialization
+
+IronBrew uses a custom serialization format (Serializer.cs:23-168).
+
+### Randomized Chunk Order
+
+Unlike vanilla Lua, chunk components are serialized in random order:
+
+```csharp
+// Serializer.cs:140-165
+for (int i = 0; i < (int)ChunkStep.StepCount; i++)
+{
+    switch (_context.ChunkSteps[i])
+    {
+        case ChunkStep.ParameterCount:
+            WriteByte(chunk.ParameterCount);
+            break;
+        case ChunkStep.Instructions:
+            WriteInt32(chunk.Instructions.Count);
+            foreach (Instruction ins in chunk.Instructions)
+                SerializeInstruction(ins);
+            break;
+        case ChunkStep.Functions:
+            WriteInt32(chunk.Functions.Count);
+            foreach (Chunk c in chunk.Functions)
+                Write(SerializeLChunk(c, false));
+            break;
+    }
+}
+```
+
+### Custom Instruction Format
+
+Instructions use a custom encoding (Serializer.cs:69-118):
+
+```csharp
+int t = (int)inst.InstructionType;
+int m = (int)inst.ConstantMask;
+WriteByte((byte)((t << 1) | (m << 3)));  // Descriptor
+WriteInt16((short)opCode);                // Virtual opcode
+WriteInt16((short)inst.A);                // Register A
+
+// Operands based on type
+switch (inst.InstructionType)
+{
+    case InstructionType.AsBx:
+        b += 1 << 16;  // Offset for signed
+        WriteInt32(b);
+        break;
+    case InstructionType.ABC:
+        WriteInt16((short)b);
+        WriteInt16((short)c);
+        break;
+    // ...
+}
+```
+
+### XOR Encryption
+
+All bytes are XOR-encrypted during serialization (Serializer.cs:29-30, 42-43):
+
+```csharp
+void WriteByte(byte b)
+{
+    if (factorXor)
+        b ^= (byte)(_context.PrimaryXorKey);
+    bytes.Add(b);
+}
+```
+
+## Bytecode Compression
+
+IronBrew can compress bytecode using LZW compression (Generator.cs:41-72):
+
+```csharp
+public static List<int> Compress(byte[] uncompressed)
+{
+    Dictionary<string, int> dictionary = new Dictionary<string, int>();
+    for (int i = 0; i < 256; i++)
+        dictionary.Add(((char)i).ToString(), i);
+ 
+    string w = string.Empty;
+    List<int> compressed = new List<int>();
+ 
+    foreach (byte b in uncompressed)
+    {
+        string wc = w + (char)b;
+        if (dictionary.ContainsKey(wc))
+            w = wc;
+        else
+        {
+            compressed.Add(dictionary[w]);
+            dictionary.Add(wc, dictionary.Count);
+            w = ((char)b).ToString();
+        }
+    }
+ 
+    if (!string.IsNullOrEmpty(w))
+        compressed.Add(dictionary[w]);
+ 
+    return compressed;
+}
+```
+
+Compressed data is encoded in base-36 (Generator.cs:74-98) for embedding in Lua.
+
+## Related Topics
+
+- [VM Architecture](/concepts/vm-architecture) - How the VM executes bytecode
+- [Obfuscation Techniques](/concepts/obfuscation-techniques) - Bytecode transformations
+- [Control Flow](/concepts/control-flow) - Control flow modifications

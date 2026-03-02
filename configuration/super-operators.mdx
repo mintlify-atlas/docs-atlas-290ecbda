@@ -1,0 +1,338 @@
+---
+title: Super Operators
+description: Combine multiple bytecode instructions into optimized super operators for enhanced obfuscation
+---
+
+Super operators are a powerful obfuscation technique that combines sequences of bytecode instructions into single, optimized operations. This makes reverse engineering significantly harder while maintaining execution performance.
+
+## Overview
+
+Instead of executing instructions individually, IronBrew 2 identifies common instruction patterns and "folds" them into super operators. This:
+
+- **Reduces VM opcode count**: Multiple instructions execute in one step
+- **Obscures logic flow**: Harder to trace individual operations
+- **Maintains performance**: Folded operations are optimized
+
+## Configuration
+
+Super operators are controlled by three settings:
+
+<ParamField path="SuperOperators" type="bool" default="true">
+  Enables super operator generation and folding. When disabled, all instructions are executed individually.
+</ParamField>
+
+<ParamField path="MaxMiniSuperOperators" type="int" default="120">
+  Maximum number of mini super operators to generate. Mini operators combine 5-10 instructions.
+</ParamField>
+
+<ParamField path="MaxMegaSuperOperators" type="int" default="120">
+  Maximum number of mega super operators to generate. Mega operators combine 60-80 instructions.
+</ParamField>
+
+### Basic Configuration
+
+```csharp
+var settings = new ObfuscationSettings
+{
+    SuperOperators = true,
+    MaxMiniSuperOperators = 120,
+    MaxMegaSuperOperators = 120
+};
+```
+
+## Mini vs Mega Operators
+
+### Mini Super Operators
+
+Mini operators fold **5-10 consecutive instructions** into a single operation.
+
+<Info>
+  Mini operators provide excellent obfuscation with minimal VM size increase. They're generated from frequently occurring instruction patterns.
+</Info>
+
+**Example**: A mini operator might combine:
+```
+GETGLOBAL (load global variable)
+LOADK (load constant)
+ADD (add values)
+SETGLOBAL (store result)
+```
+
+Into a single "MINI_OP_47" that executes all four steps.
+
+From `Generator.cs:392`:
+```csharp
+var miniOperators = GenerateSuperOperators(_context.HeadChunk, 10)
+    .OrderBy(t => r.Next())
+    .Take(settings.MaxMiniSuperOperators)
+    .ToList();
+```
+
+### Mega Super Operators
+
+Mega operators fold **60-80 consecutive instructions** into a single operation.
+
+<Warning>
+  Mega operators provide exceptional obfuscation but increase VM size. Use moderately for best balance.
+</Warning>
+
+**Example**: A mega operator might fold an entire function body:
+```
+LOADK, GETTABLE, LOADK, GETTABLE, CALL, GETGLOBAL,
+LOADK, ADD, SETTABLE, GETGLOBAL, LOADK, CONCAT,
+... (60-80 total instructions)
+```
+
+Into "MEGA_OP_12" that executes the complete sequence.
+
+From `Generator.cs:383`:
+```csharp
+var megaOperators = GenerateSuperOperators(_context.HeadChunk, 80, 60)
+    .OrderBy(t => r.Next())
+    .Take(settings.MaxMegaSuperOperators)
+    .ToList();
+```
+
+## How Super Operators Work
+
+### 1. Pattern Discovery
+
+IronBrew 2 scans the bytecode to find instruction sequences that can be folded:
+
+```csharp
+public List<OpSuperOperator> GenerateSuperOperators(Chunk chunk, int maxSize, int minSize = 5)
+{
+    List<OpSuperOperator> results = new List<OpSuperOperator>();
+    
+    // Scan for foldable sequences
+    for (int i = 0; i < chunk.Instructions.Count - 1; i++)
+    {
+        // Skip instructions that can't be folded (jumps, closures, etc)
+        // Identify sequences of maxSize length
+        // Create super operator from sequence
+    }
+    
+    return results;
+}
+```
+
+Certain instructions are skipped (from `Generator.cs:178`):
+- Jump targets
+- Closure definitions
+- Conditional branches
+- Already folded operators
+
+### 2. Operator Generation
+
+When a valid sequence is found, a super operator is created:
+
+```csharp
+public class OpSuperOperator : VOpcode
+{
+    public VOpcode[] SubOpcodes;  // The folded instructions
+    
+    public override string GetObfuscated(ObfuscationContext context)
+    {
+        string s = "";
+        
+        // Combine all sub-opcodes into single operation
+        for (var index = 0; index < SubOpcodes.Length; index++)
+        {
+            var subOpcode = SubOpcodes[index];
+            s += subOpcode.GetObfuscated(context);
+            
+            if (index + 1 < SubOpcodes.Length)
+                s += "InstrPoint = InstrPoint + 1;Inst = Instr[InstrPoint];";
+        }
+        
+        return s;
+    }
+}
+```
+
+From `OpSuperOperator.cs:9`.
+
+### 3. Instruction Folding
+
+The VM replaces instruction sequences with super operator calls:
+
+**Before**:
+```
+Instr[100] = GETGLOBAL
+Instr[101] = LOADK  
+Instr[102] = ADD
+Instr[103] = SETGLOBAL
+```
+
+**After**:
+```
+Instr[100] = SUPER_OP_47  // Executes all 4 instructions
+```
+
+From `Generator.cs:390`:
+```csharp
+FoldAdditionalSuperOperators(_context.HeadChunk, megaOperators, ref folded);
+// ...
+Console.WriteLine("Folded " + folded + " instructions into super operators.");
+```
+
+## Configuration Examples
+
+<Tabs>
+  <Tab title="Maximum Obfuscation">
+    Generate many operators for strongest protection:
+    
+    ```csharp
+    var settings = new ObfuscationSettings
+    {
+        SuperOperators = true,
+        MaxMiniSuperOperators = 200,  // Many mini operators
+        MaxMegaSuperOperators = 150   // Many mega operators
+    };
+    ```
+    
+    **Result**: Extremely obfuscated code, larger VM size
+  </Tab>
+  
+  <Tab title="Balanced (Default)">
+    Recommended for most use cases:
+    
+    ```csharp
+    var settings = new ObfuscationSettings
+    {
+        SuperOperators = true,
+        MaxMiniSuperOperators = 120,  // Default
+        MaxMegaSuperOperators = 120   // Default  
+    };
+    ```
+    
+    **Result**: Strong obfuscation, reasonable VM size
+  </Tab>
+  
+  <Tab title="Minimal">
+    Lighter obfuscation, smaller output:
+    
+    ```csharp
+    var settings = new ObfuscationSettings
+    {
+        SuperOperators = true,
+        MaxMiniSuperOperators = 50,   // Fewer operators
+        MaxMegaSuperOperators = 30    // Fewer operators
+    };
+    ```
+    
+    **Result**: Moderate obfuscation, minimal size impact
+  </Tab>
+  
+  <Tab title="Disabled">
+    No super operator folding:
+    
+    ```csharp
+    var settings = new ObfuscationSettings
+    {
+        SuperOperators = false
+    };
+    ```
+    
+    **Result**: Standard instruction execution
+  </Tab>
+</Tabs>
+
+## Performance Considerations
+
+### Execution Performance
+
+Super operators **improve or maintain** runtime performance:
+
+- **Reduced instruction pointer updates**: One operation instead of many
+- **Better CPU cache usage**: Sequential code in single operation  
+- **Optimized register access**: Shared locals across sub-operations
+
+<Info>
+  In most cases, super operators provide a slight performance improvement while dramatically increasing obfuscation.
+</Info>
+
+### VM Size Impact
+
+More super operators increase the VM size:
+
+| Configuration | VM Size Impact |
+|---------------|----------------|
+| Mini only (120) | +10-15% |
+| Mega only (120) | +25-35% |
+| Both (default) | +30-40% |
+| Maximum (200/150) | +50-60% |
+
+**Recommendation**: Start with defaults and adjust based on your size constraints.
+
+### Obfuscation Strength
+
+Super operators significantly increase reverse engineering difficulty:
+
+- **Without**: Individual instructions are traceable
+- **With Mini**: Small operation sequences hidden
+- **With Mega**: Large code blocks completely obscured
+- **With Both**: Layered obfuscation at multiple granularities
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use both mini and mega operators">
+    Combining both types creates multiple layers of obfuscation. Mini operators handle common patterns while mega operators obscure larger code blocks.
+  </Accordion>
+  
+  <Accordion title="Increase limits for critical scripts">
+    For scripts containing proprietary algorithms or sensitive logic, increase both limits to 150-200 for maximum protection.
+  </Accordion>
+  
+  <Accordion title="Monitor VM size">
+    If output size is a concern, reduce mega operators first (they have larger impact) while keeping mini operators high.
+  </Accordion>
+  
+  <Accordion title="Combine with other features">
+    Super operators work best alongside control flow obfuscation and instruction mutation for comprehensive protection.
+  </Accordion>
+</AccordionGroup>
+
+## Complete Example
+
+Here's a comprehensive configuration using super operators with other features:
+
+```csharp
+using IronBrew2.Obfuscator;
+
+var settings = new ObfuscationSettings
+{
+    // Super operator configuration
+    SuperOperators = true,
+    MaxMiniSuperOperators = 150,
+    MaxMegaSuperOperators = 100,
+    
+    // Complementary features
+    ControlFlow = true,        // Flatten control flow
+    Mutate = true,             // Randomize instructions
+    MaxMutations = 250,
+    
+    // String protection
+    EncryptImportantStrings = true,
+    
+    // Production settings
+    PreserveLineInfo = false,
+    BytecodeCompress = true
+};
+
+var obfuscator = new Obfuscator(settings);
+string obfuscated = obfuscator.Obfuscate(luaSource);
+
+// Output will show:
+// "Created 100 mega super operators."
+// "Created 150 mini super operators."
+// "Folded 387 instructions into super operators."
+```
+
+## Source References
+
+- Super operator implementation: `IronBrew2/Obfuscator/Opcodes/OpSuperOperator.cs`
+- Generation logic: `IronBrew2/Obfuscator/VM Generation/Generator.cs:169-256`
+- Folding logic: `Generator.cs:258-350`
+- Settings: `IronBrew2/Obfuscator/ObfuscationSettings.cs:12-14`

@@ -1,0 +1,122 @@
+---
+title: 'Basic Usage'
+description: 'Learn how to use the IronBrew 2 command-line interface'
+---
+
+## Command Syntax
+
+The basic syntax for IronBrew 2 CLI is:
+
+```bash
+IronBrew2.exe <input-file>
+```
+
+<ParamField path="input-file" type="string" required>
+  Path to the Lua script you want to obfuscate
+</ParamField>
+
+## How It Works
+
+1. **Input**: Provide a path to your Lua 5.1 script
+2. **Processing**: IronBrew 2 obfuscates the script using default settings
+3. **Output**: The obfuscated script is saved as `out.lua` in the current directory
+
+## File Handling
+
+### Input File
+
+The CLI accepts a single input file path as an argument:
+
+```bash
+IronBrew2.exe myscript.lua
+```
+
+The input file must:
+- Be a valid Lua 5.1 script
+- Exist at the specified path
+- Have proper syntax (the tool validates this using `luac`)
+
+### Output File
+
+The obfuscated output is always written to:
+
+```
+out.lua
+```
+
+Located in the current working directory where the CLI is executed.
+
+<Warning>
+  If `out.lua` already exists, it will be overwritten without warning.
+</Warning>
+
+### Temporary Files
+
+The CLI creates a `temp/` directory during obfuscation:
+- Used for intermediate processing steps
+- Automatically cleaned up before each run
+- Contains compiled bytecode and transformation stages
+
+## Execution Flow
+
+When you run the CLI, it performs these steps:
+
+1. **File Validation** - Checks if the input file exists and is valid Lua
+2. **Comment Stripping** - Removes comments while preserving code structure
+3. **String Encryption** - Encrypts string constants in the source
+4. **Compilation** - Compiles to Lua bytecode using `luac`
+5. **Obfuscation** - Applies control flow and VM transformations
+6. **Serialization** - Generates the final obfuscated code
+7. **Minification** - Compresses the output for smaller file size
+8. **Watermark** - Adds IronBrew header to the output
+
+## Console Output
+
+During execution, you'll see progress messages:
+
+```bash
+IronBrew2.exe script.lua
+```
+
+```
+Checking file...
+Stripping comments...
+Compiling...
+Obfuscating...
+Serializing...
+Minifying...
+Watermark...
+Done!
+```
+
+## Error Handling
+
+If an error occurs, the CLI will output:
+
+```
+ERR: <error message>
+```
+
+Common errors include:
+- Invalid input file path
+- Syntax errors in the Lua script
+- Missing dependencies (`luac`, `luajit`)
+- Permission issues writing output files
+
+## Requirements
+
+The CLI requires these external tools to be available:
+
+<CardGroup cols={2}>
+  <Card title="luac" icon="code">
+    Lua 5.1 compiler for bytecode generation
+  </Card>
+  <Card title="luajit" icon="bolt">
+    LuaJIT for running the minifier tool
+  </Card>
+</CardGroup>
+
+### Platform-Specific Paths
+
+- **Windows**: Tools should be in PATH or current directory
+- **Linux/Unix**: Tools are expected in `/usr/bin/`

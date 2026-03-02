@@ -1,0 +1,161 @@
+---
+title: 'Chunk'
+description: 'Represents a Lua function chunk containing bytecode, constants, and nested functions'
+---
+
+The `Chunk` class represents a compiled Lua function, containing all the bytecode instructions, constants, nested functions, and metadata needed to execute the function.
+
+## Namespace
+
+```csharp
+IronBrew2.Bytecode_Library.IR
+```
+
+## Properties
+
+<ResponseField name="Name" type="string">
+  The name of the chunk (function name or source file)
+</ResponseField>
+
+<ResponseField name="Line" type="int">
+  Starting line number in the source code
+</ResponseField>
+
+<ResponseField name="LastLine" type="int">
+  Ending line number in the source code
+</ResponseField>
+
+<ResponseField name="UpvalueCount" type="byte">
+  Number of upvalues referenced by this chunk
+</ResponseField>
+
+<ResponseField name="ParameterCount" type="byte">
+  Number of parameters the function accepts
+</ResponseField>
+
+<ResponseField name="VarargFlag" type="byte">
+  Flag indicating if the function uses varargs (...)
+</ResponseField>
+
+<ResponseField name="StackSize" type="byte">
+  Maximum stack size required for execution
+</ResponseField>
+
+<ResponseField name="CurrentOffset" type="int" default="0">
+  Current register offset for stack rebasing
+</ResponseField>
+
+<ResponseField name="CurrentParamOffset" type="int" default="0">
+  Current parameter offset for stack rebasing
+</ResponseField>
+
+<ResponseField name="Instructions" type="List<Instruction>">
+  List of bytecode instructions in this chunk
+</ResponseField>
+
+<ResponseField name="InstructionMap" type="Dictionary<Instruction, int>">
+  Maps instructions to their index positions for quick lookup
+</ResponseField>
+
+<ResponseField name="Constants" type="List<Constant>">
+  List of constant values used by the chunk (strings, numbers, booleans, nil)
+</ResponseField>
+
+<ResponseField name="ConstantMap" type="Dictionary<Constant, int>">
+  Maps constants to their index positions for quick lookup
+</ResponseField>
+
+<ResponseField name="Functions" type="List<Chunk>">
+  List of nested function chunks (prototypes)
+</ResponseField>
+
+<ResponseField name="FunctionMap" type="Dictionary<Chunk, int>">
+  Maps nested chunks to their index positions for quick lookup
+</ResponseField>
+
+<ResponseField name="Upvalues" type="List<string>">
+  List of upvalue names
+</ResponseField>
+
+## Methods
+
+### UpdateMappings
+
+```csharp
+public void UpdateMappings()
+```
+
+Rebuild all mapping dictionaries (InstructionMap, ConstantMap, FunctionMap) based on the current list contents. This should be called after modifying the Instructions, Constants, or Functions lists to ensure mappings are synchronized.
+
+<Note>
+  This method clears and rebuilds all three mapping dictionaries, so call it after batch modifications rather than after each individual change.
+</Note>
+
+### Rebase
+
+```csharp
+public int Rebase(int offset, int paramOffset = 0)
+```
+
+Adjusts register and parameter indices in all instructions to accommodate stack changes. This is used when merging or inlining chunks.
+
+<ParamField path="offset" type="int" required>
+  The offset to add to register indices
+</ParamField>
+
+<ParamField path="paramOffset" type="int" default="0">
+  The offset to add to parameter indices
+</ParamField>
+
+<ResponseField name="returns" type="int">
+  The ParameterCount of the chunk
+</ResponseField>
+
+<Note>
+  The method intelligently distinguishes between parameters and regular stack values when applying offsets, handling each Lua opcode's specific register requirements.
+</Note>
+
+## Usage Example
+
+```csharp
+using IronBrew2.Bytecode_Library.Bytecode;
+using IronBrew2.Bytecode_Library.IR;
+
+// Deserialize a Lua bytecode file
+byte[] bytecode = File.ReadAllBytes("script.luac");
+Deserializer deserializer = new Deserializer(bytecode);
+Chunk mainChunk = deserializer.DecodeFile();
+
+// Access chunk properties
+Console.WriteLine($"Function: {mainChunk.Name}");
+Console.WriteLine($"Instructions: {mainChunk.Instructions.Count}");
+Console.WriteLine($"Constants: {mainChunk.Constants.Count}");
+Console.WriteLine($"Nested functions: {mainChunk.Functions.Count}");
+
+// Modify instructions and update mappings
+mainChunk.Instructions.Add(new Instruction(mainChunk, Opcode.Return));
+mainChunk.UpdateMappings();
+
+// Rebase registers when inlining
+Chunk inlinedChunk = mainChunk.Functions[0];
+inlinedChunk.Rebase(mainChunk.StackSize);
+```
+
+## Chunk Structure
+
+A Lua chunk follows a hierarchical structure:
+
+```
+Chunk
+├── Metadata (Name, Line info, Upvalues, Parameters)
+├── Instructions (Bytecode)
+├── Constants (Literals used by instructions)
+└── Functions (Nested chunks/prototypes)
+    └── Each function is itself a Chunk
+```
+
+## See Also
+
+- [Instruction](/api/instruction) - Individual bytecode instructions
+- [Deserializer](/api/deserializer) - Decode chunks from bytecode files
+- [Serializer](/api/serializer) - Encode chunks back to bytecode

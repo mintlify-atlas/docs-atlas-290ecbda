@@ -1,0 +1,539 @@
+---
+title: Control Flow Obfuscation
+description: Understanding control flow transformations in IronBrew 2
+---
+
+## Overview
+
+**Control flow obfuscation** transforms the logical flow of code to make it harder to analyze while preserving functionality. IronBrew 2 implements several control flow transformations that make decompilation and static analysis significantly more difficult.
+
+## Control Flow System
+
+### CFContext
+
+The control flow system is managed by `CFContext` (CFContext.cs:12-116):
+
+```csharp
+public class CFContext
+{
+    public Chunk lChunk;
+
+    public void DoChunks()
+    {
+        new Inlining(lChunk).DoChunks();  // Inline functions
+        DoChunk(lChunk);                  // Apply transformations
+    }
+}
+```
+
+### Activation System
+
+Control flow is activated using special marker functions (CFContext.cs:32-38):
+
+```lua
+IB_MAX_CFLOW_START()  -- Begin obfuscated section
+-- Your code here
+IB_MAX_CFLOW_END()    -- End obfuscated section
+```
+
+The obfuscator detects these markers (CFContext.cs:26-41):
+
+```csharp
+if (instr.OpCode == Opcode.GetGlobal && Instructs[index + 1].OpCode == Opcode.Call)
+{
+    string str = ((Constant)instr.RefOperands[0]).Data.ToString();
+    
+    switch (str)
+    {
+        case "IB_MAX_CFLOW_START":
+            CBegin = instr;
+            chunkHasCflow = true;
+            break;
+        case "IB_MAX_CFLOW_END":
+            // Apply transformations to instructions between markers
+            break;
+    }
+}
+```
+
+Markers are replaced with no-ops after detection (CFContext.cs:86-93).
+
+### CFGenerator
+
+Helper class for generating control flow structures (CFGenerator.cs:8-83):
+
+```csharp
+public class CFGenerator
+{
+    public Random Random = new Random();
+
+    public Instruction NextJMP(Chunk lc, Instruction Reference) =>
+        new Instruction(lc, Opcode.Jmp, Reference);
+
+    public Instruction BelievableRandom(Chunk lc)
+    {
+        // Generate realistic-looking junk instructions
+    }
+    
+    public Constant GetOrAddConstant(Chunk chunk, ConstantType type, dynamic constant, out int constantIndex)
+    {
+        // Get existing or add new constant
+    }
+}
+```
+
+## Control Flow Transformations
+
+### 1. Test Spam
+
+Adds fake test instructions (CFContext.cs:54-55):
+
+```csharp
+TestSpam.DoInstructions(c, nIns);
+```
+
+This transformation adds believable but non-functional test instructions to confuse analysis.
+
+### 2. Bounce Jumps
+
+Adds indirect jumps (Bounce.cs:16-36, CFContext.cs:67-68):
+
+```csharp
+public static void DoInstructions(Chunk chunk, List<Instruction> Instructions)
+{
+    Instructions = Instructions.ToList();
+    foreach (Instruction l in Instructions)
+    {
+        if (l.OpCode != Opcode.Jmp)
+            continue;
+
+        // Create intermediate jump
+        Instruction First = CFGenerator.NextJMP(chunk, (Instruction)l.RefOperands[0]);
+        chunk.Instructions.Add(First);     // Add bounce target
+        l.RefOperands[0] = First;           // Redirect to bounce
+    }
+    
+    chunk.UpdateMappings();
+}
+```
+
+**Before**:
+```
+0: LOADK R0 K1
+1: TEST R0 0
+2: JMP 5        -- Jump directly to target
+3: LOADK R1 K2
+4: RETURN
+5: LOADK R2 K3  -- Target
+```
+
+**After**:
+```
+0: LOADK R0 K1
+1: TEST R0 0
+2: JMP 6        -- Jump to bounce
+3: LOADK R1 K2
+4: RETURN
+5: LOADK R2 K3  -- Original target
+6: JMP 5        -- Bounce jump to real target
+```
+
+This makes jump targets less obvious and adds indirection.
+
+### 3. Test Flip
+
+Inverts test conditions (TestFlip.cs:10-53, CFContext.cs:98):
+
+```csharp
+public static void DoInstructions(Chunk chunk, List<Instruction> instructions)
+{
+    CFGenerator generator = new CFGenerator();
+    Random r = new Random();
+
+    for (int idx = instructions.Count - 1; idx >= 0; idx--)
+    {
+        Instruction i = instructions[idx];
+        switch (i.OpCode)
+        {
+            case Opcode.Lt:
+            case Opcode.Le:
+            case Opcode.Eq:
+            {
+                if (r.Next(2) == 1)
+                {
+                    i.A = i.A == 0 ? 1 : 0;  // Flip condition
+                    // Insert compensating jump
+                    Instruction nJmp = generator.NextJMP(chunk, instructions[idx + 2]);
+                    chunk.Instructions.Insert(chunk.InstructionMap[i] + 1, nJmp);
+                }
+                break;
+            }
+
+            case Opcode.Test:
+            {
+                if (r.Next(2) == 1) {
+                    i.C = i.C == 0 ? 1 : 0;  // Flip test
+                    // Insert compensating jump
+                    Instruction nJmp = generator.NextJMP(chunk, instructions[idx + 2]);
+                    chunk.Instructions.Insert(chunk.InstructionMap[i] + 1, nJmp);
+                }
+                break;
+            }
+        }
+    }
+    
+    chunk.UpdateMappings();
+}
+```
+
+**Before**:
+```
+0: LT 0 R1 R2    -- if R1 < R2 then skip next
+1: JMP 3         -- else jump to 3
+2: LOADK R0 K1   -- true branch
+3: RETURN        -- continue
+```
+
+**After**:
+```
+0: LT 1 R1 R2    -- if R1 >= R2 then skip next (inverted!)
+1: JMP 3         -- jump over compensating jump
+2: JMP 4         -- compensating jump to true branch
+3: RETURN        -- false branch (was after jump)
+4: LOADK R0 K1   -- true branch (compensated)
+```
+
+The logic is equivalent but the control flow looks different.
+
+### 4. Test Preserve (Disabled)
+
+Preserves test values for later use (CFContext.cs:74-75):
+
+```csharp
+// Console.WriteLine("Test Preserve");
+// TestPreserve.DoInstructions(c, nIns);
+```
+
+Currently commented out in the source.
+
+### 5. EQ Mutate (Disabled)
+
+Mutates equality comparisons (CFContext.cs:77-78):
+
+```csharp
+// Console.WriteLine("EQ Mutate");
+// EQMutate.DoInstructions(c, c.Instructions.ToList());
+```
+
+Currently commented out in the source.
+
+### 6. Number Mutate
+
+Transforms numeric constants. While not shown in CFContext, `NumberMutate.cs` exists in the source tree (Control Flow/Types/NumberMutate.cs).
+
+### 7. Inlining
+
+Inlines function calls (CFContext.cs:109):
+
+```csharp
+new Inlining(lChunk).DoChunks();
+```
+
+This transformation:
+- Detects calls to inlineable functions
+- Replaces call instructions with the function body
+- Adjusts register allocation
+- Removes the original function definition
+
+Marked with special markers:
+
+```lua
+function foo()
+    IB_INLINING_START(true)
+    -- This function will be inlined at call sites
+    return 42
+end
+```
+
+## Stack Management
+
+When control flow is applied, a new stack frame is created (CFContext.cs:100-101):
+
+```csharp
+if (chunkHasCflow)
+    c.Instructions.Insert(0, new Instruction(c, Opcode.NewStack));
+```
+
+This custom opcode (`NewStack`) tells the VM to:
+- Allocate a new execution stack
+- Isolate the obfuscated section
+- Prevent stack-based analysis
+
+## Believable Random Instructions
+
+The `BelievableRandom` method generates realistic junk code (CFGenerator.cs:15-56):
+
+```csharp
+public Instruction BelievableRandom(Chunk lc)
+{
+    Instruction ins = new Instruction(lc, (Opcode)Random.Next(0, 37));
+
+    ins.A = Random.Next(0, 128);
+    ins.B = Random.Next(0, 128);
+    ins.C = Random.Next(0, 128);
+
+    while (true)
+    {
+        switch (ins.OpCode)
+        {
+            // Avoid opcodes that would be obviously fake
+            case Opcode.LoadConst:  // Would need valid constant
+            case Opcode.GetGlobal:  // Would need valid global
+            case Opcode.Jmp:        // Would need valid target
+            case Opcode.Closure:    // Would need valid function
+                ins.OpCode = (Opcode)Random.Next(0, 37);
+                continue;  // Try another opcode
+
+            default:
+                return ins;  // This opcode is believable
+        }
+    }
+}
+```
+
+This ensures junk instructions:
+- Use safe opcodes (arithmetic, stack ops, etc.)
+- Have random but valid-looking operands
+- Don't crash or cause obvious errors
+- Blend in with real code
+
+## Constant Management
+
+Control flow transformations may need to add constants (CFGenerator.cs:58-82):
+
+```csharp
+public Constant GetOrAddConstant(Chunk chunk, ConstantType type, dynamic constant, out int constantIndex)
+{
+    // Check if constant already exists
+    var current = chunk.Constants.FirstOrDefault(c => 
+        c.Type == type && c.Data == constant);
+    
+    if (current != null)
+    {
+        constantIndex = chunk.Constants.IndexOf(current);
+        return current;
+    }
+
+    // Create new constant
+    Constant newConst = new Constant
+    {
+        Type = type,
+        Data = constant
+    };
+
+    constantIndex = chunk.Constants.Count;
+    chunk.Constants.Add(newConst);
+    chunk.ConstantMap.Add(newConst, constantIndex);
+
+    return newConst;
+}
+```
+
+This prevents duplicate constants while allowing transformations to add new ones.
+
+## Transformation Order
+
+Transformations are applied in a specific order (CFContext.cs:54-78):
+
+1. **Test Spam** - Add fake tests first
+2. **Bounce** - Add jump indirection
+3. ~~Test Preserve~~ (disabled)
+4. ~~EQ Mutate~~ (disabled)
+5. **Test Flip** - Invert conditions (applied globally to all chunks)
+
+This order ensures:
+- Junk code is added before real transformations
+- Jump targets are adjusted after bounces
+- Condition flips happen last (applied to whole chunk)
+
+## Applied Transformations
+
+The transformation process (CFContext.cs:45-81):
+
+```csharp
+int cBegin = c.InstructionMap[CBegin];
+int cEnd = c.InstructionMap[instr];
+
+// Extract instructions between markers
+List<Instruction> nIns = c.Instructions
+    .Skip(cBegin)
+    .Take(cEnd - cBegin)
+    .ToList();
+
+// Apply transformations
+Console.WriteLine("Test Spam");
+TestSpam.DoInstructions(c, nIns);
+
+// Re-extract (indices changed)
+cBegin = c.InstructionMap[CBegin];
+cEnd = c.InstructionMap[instr];
+nIns = c.Instructions.Skip(cBegin).Take(cEnd - cBegin).ToList();
+
+Console.WriteLine("Bounce");
+Bounce.DoInstructions(c, nIns);
+```
+
+Notice how indices are **recalculated** between transformations because:
+- Test Spam adds instructions
+- Instruction indices shift
+- Bounce needs correct indices
+
+## Integration with VM
+
+Control flow obfuscation works with the VM:
+
+1. **Custom Opcodes**: NewStack, PushStack, SetTop (Opcode.cs:44-48)
+2. **Stack Isolation**: Obfuscated sections run in isolated stacks
+3. **Jump Resolution**: VM resolves jump targets at runtime
+4. **Condition Evaluation**: Flipped conditions are properly handled
+
+## Example Transformation
+
+Original code:
+
+```lua
+function calculate(x, y)
+    IB_MAX_CFLOW_START()
+    if x > y then
+        return x + y
+    else
+        return x - y
+    end
+    IB_MAX_CFLOW_END()
+end
+```
+
+Bytecode before:
+
+```
+0: LT 0 R1 R0      -- if y < x (x > y)
+1: JMP 4           -- jump to else
+2: ADD R2 R0 R1    -- x + y
+3: RETURN R2 1     -- return result
+4: SUB R2 R0 R1    -- x - y
+5: RETURN R2 1     -- return result
+```
+
+After transformations:
+
+```
+0: NEWSTACK        -- Create isolated stack
+1: TEST R3 0       -- Junk test (Test Spam)
+2: LT 1 R1 R0      -- if y >= x (Test Flip - inverted!)
+3: JMP 5           -- jump over compensating jump
+4: JMP 8           -- compensating jump (Bounce)
+5: SUB R2 R0 R1    -- x - y (else branch)
+6: RETURN R2 1
+7: RETURN R2 1     -- unreachable (junk)
+8: JMP 10          -- bounce jump (Bounce)
+9: LOADK R4 K0     -- junk (Test Spam)
+10: ADD R2 R0 R1   -- x + y (then branch)
+11: RETURN R2 1
+```
+
+The logic is preserved but the control flow is significantly more complex.
+
+## Performance Impact
+
+Control flow obfuscation adds:
+
+- **Extra instructions**: Junk tests, bounce jumps, compensating jumps
+- **Runtime overhead**: Additional jumps must be executed
+- **Code size increase**: More instructions = larger bytecode
+
+**Typical overhead**:
+- Test Spam: +10-20% instructions
+- Bounce: +50% jump instructions (each jump becomes 2)
+- Test Flip: +1 jump per flipped condition
+- Overall: +20-40% code size, +15-30% execution time
+
+## When to Use Control Flow
+
+Use control flow obfuscation when:
+
+- **Security is critical**: Protecting anti-cheat, licensing, DRM
+- **Decompilation is a threat**: Prevent readable decompiled output
+- **Static analysis must be blocked**: Make IDA/Ghidra analysis harder
+
+Avoid in:
+
+- **Performance-critical loops**: Overhead can be significant
+- **Large functions**: Can create extremely complex control flow
+- **Already slow code**: Don't make it worse
+
+## Best Practices
+
+### Selective Application
+
+```lua
+-- Only protect sensitive functions
+function checkLicense(key)
+    IB_MAX_CFLOW_START()
+    -- License validation logic
+    IB_MAX_CFLOW_END()
+end
+
+-- Don't protect performance code
+function render()
+    -- No markers - no obfuscation
+end
+```
+
+### Marker Placement
+
+Place markers around:
+- License checks
+- Anti-tamper code
+- Encryption/decryption
+- Authentication logic
+
+Don't place around:
+- Rendering loops
+- Input processing
+- Audio processing
+- Network I/O
+
+### Combining Techniques
+
+Control flow works best with:
+- **Instruction mutations**: Adds another analysis layer
+- **Super operators**: Hides control flow in combined instructions
+- **String encryption**: Hides what code is checking
+
+Example:
+
+```lua
+function validate(input)
+    IB_MAX_CFLOW_START()
+    local key = "[STR_ENCRYPT]SECRET_KEY_123"
+    if input == key then
+        return true
+    end
+    IB_MAX_CFLOW_END()
+    return false
+end
+```
+
+This combines:
+- Control flow obfuscation (IB_MAX_CFLOW)
+- String encryption ([STR_ENCRYPT])
+- VM obfuscation (automatic)
+- Mutations (automatic)
+
+Result: Extremely difficult to analyze.
+
+## Related Topics
+
+- [VM Architecture](/concepts/vm-architecture) - The execution environment
+- [Obfuscation Techniques](/concepts/obfuscation-techniques) - Other protection methods
+- [Bytecode](/concepts/bytecode) - Understanding instructions

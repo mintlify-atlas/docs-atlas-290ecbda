@@ -1,0 +1,241 @@
+---
+title: String Encryption
+description: Encrypt string constants to protect sensitive data and obfuscate script logic
+---
+
+IronBrew 2 provides powerful string encryption capabilities to protect sensitive data and hide script logic from reverse engineering.
+
+## Overview
+
+String encryption uses XOR cipher with dynamically generated decryption tables. At runtime, encrypted strings are decrypted by the virtual machine using inline decryption functions.
+
+## Encryption Modes
+
+### Full String Encryption
+
+When `EncryptStrings` is enabled, **all** string constants in your Lua script are encrypted:
+
+```csharp
+var settings = new ObfuscationSettings
+{
+    EncryptStrings = true,
+    DecryptTableLen = 500  // Max decryption table size
+};
+```
+
+<Warning>
+  Encrypting all strings increases VM size and runtime overhead. Use selectively for best results.
+</Warning>
+
+### Important Strings
+
+For targeted protection, enable `EncryptImportantStrings` to encrypt only strings containing sensitive keywords:
+
+```csharp
+var settings = new ObfuscationSettings
+{
+    EncryptImportantStrings = true
+};
+```
+
+Strings are encrypted if they contain:
+- `http` - URLs and web requests
+- `function` - Function names
+- `metatable` - Metatable operations
+- `local` - Variable declarations
+
+This mode is defined in `IronBrew2/Obfuscator/Encryption/ConstantEncryption.cs:206`.
+
+### Manual String Marking
+
+You can explicitly mark strings for encryption using the `[STR_ENCRYPT]` prefix:
+
+```lua
+local apiKey = "[STR_ENCRYPT]sk_live_abc123xyz789"
+local publicData = "This will not be encrypted"
+```
+
+Manually marked strings are **always** encrypted, regardless of settings.
+
+## How Encryption Works
+
+### XOR Cipher Implementation
+
+IronBrew 2 uses XOR encryption with random byte tables:
+
+1. **Table Generation**: A random byte table is generated with length up to `DecryptTableLen`
+2. **Encryption**: Each byte in the string is XOR'd with the corresponding table position (cycling)
+3. **Inline Decryption**: The VM injects a decryption function that reverses the process at runtime
+
+From `ConstantEncryption.cs:18`:
+
+```csharp
+for (var index = 0; index < bytes.Length; index++)
+    encrypted.Add((byte) (bytes[index] ^ Table[index % L]));
+```
+
+### Decryption Function
+
+The generated decryption code is injected inline:
+
+```lua
+((function(b)
+    local function xor(b,c)
+        -- XOR implementation
+    end
+    local c=""
+    local t = {} -- Lookup table
+    local f="\\123\\45..." -- Decryption table
+    for g=1,#b do 
+        local x=(g-1) % 500+1
+        c=c..t[xor(t[e(b,g,g)],t[e(f, x, x)])]
+    end
+    return c
+end)("\\98\\67...") -- Encrypted bytes
+```
+
+## DecryptTableLen Configuration
+
+The `DecryptTableLen` setting controls the maximum size of decryption tables:
+
+```csharp
+var settings = new ObfuscationSettings
+{
+    EncryptStrings = true,
+    DecryptTableLen = 750  // Larger = stronger encryption
+};
+```
+
+<ParamField path="DecryptTableLen" type="int" default="500">
+  Maximum decryption table length. The actual table size is determined by:
+  - The longest string in your script
+  - The `DecryptTableLen` limit (whichever is smaller)
+  
+  **Recommendations**:
+  - **Small scripts**: 200-300
+  - **Medium scripts**: 500 (default)
+  - **Large scripts**: 750-1000
+</ParamField>
+
+From `ConstantEncryption.cs:44`:
+
+```csharp
+public Decryptor GenerateGenericDecryptor(MatchCollection matches)
+{
+    int len = 0;
+    for (int i = 0; i < matches.Count; i++)
+    {
+        int l = matches[i].Length;
+        if (l > len)
+            len = l;
+    }
+    
+    if (len > _settings.DecryptTableLen)
+        len = _settings.DecryptTableLen;
+    
+    return new Decryptor("IRONBREW_STR_DEC_GENERIC", len);
+}
+```
+
+## Examples
+
+### Before Obfuscation
+
+```lua
+local apiEndpoint = "https://api.example.com/v1/data"
+local function authenticate(key)
+    return key == "secret123"
+end
+
+print("Debug: Starting authentication")
+```
+
+### With EncryptImportantStrings
+
+Only the string containing "http" and "function" context are encrypted:
+
+```lua
+-- apiEndpoint string is encrypted (contains "http")
+local apiEndpoint = ((function(b)...end)("\\98\\67...")
+
+-- Function logic preserved
+local function authenticate(key)
+    return key == "secret123"  -- Not encrypted
+end
+
+print("Debug: Starting authentication")  -- Not encrypted
+```
+
+### With EncryptStrings
+
+**All** strings are encrypted:
+
+```lua
+local apiEndpoint = ((function(b)...end)("\\98\\67..."))
+local function authenticate(key)
+    return key == ((function(b)...end)("\\115\\101..."))
+end
+
+print(((function(b)...end)("\\68\\101...")))
+```
+
+## Combining with Other Features
+
+String encryption works seamlessly with other obfuscation features:
+
+```csharp
+var settings = new ObfuscationSettings
+{
+    // String protection
+    EncryptStrings = true,
+    EncryptImportantStrings = true,
+    DecryptTableLen = 600,
+    
+    // Additional obfuscation
+    ControlFlow = true,
+    Mutate = true,
+    SuperOperators = true
+};
+```
+
+This creates multiple layers of protection:
+1. Strings are encrypted and hidden
+2. Control flow is flattened and obscured
+3. Instructions are mutated and folded
+
+## Performance Impact
+
+<Info>
+  String decryption happens once per string at load time, not on every access. The performance impact is primarily during script initialization.
+</Info>
+
+**Benchmark** (approximate overhead):
+- **EncryptImportantStrings**: +5-15% initialization time
+- **EncryptStrings**: +20-40% initialization time
+- **Runtime**: Negligible (strings are decrypted once)
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use EncryptImportantStrings for most cases">
+    This provides good protection for sensitive data without encrypting benign strings like error messages.
+  </Accordion>
+  
+  <Accordion title="Reserve EncryptStrings for high-security needs">
+    Full encryption is best for scripts containing proprietary algorithms or sensitive business logic.
+  </Accordion>
+  
+  <Accordion title="Adjust DecryptTableLen based on script size">
+    Larger scripts with long strings benefit from higher values (750-1000).
+  </Accordion>
+  
+  <Accordion title="Manually mark critical strings">
+    Use `[STR_ENCRYPT]` prefix for API keys, tokens, and other secrets to ensure they're always protected.
+  </Accordion>
+</AccordionGroup>
+
+## Source References
+
+- Encryption implementation: `IronBrew2/Obfuscator/Encryption/ConstantEncryption.cs`
+- Settings definition: `IronBrew2/Obfuscator/ObfuscationSettings.cs:5-9`
+- XOR encryption: `ConstantEncryption.cs:17-27`

@@ -1,0 +1,226 @@
+---
+title: Generator
+description: The Generator class orchestrates virtual machine generation and opcode obfuscation in IronBrew 2
+---
+
+The `Generator` class is responsible for creating the obfuscated Lua virtual machine that executes your protected code. It handles opcode mapping, mutation generation, super operator creation, and VM code generation.
+
+## Constructor
+
+```csharp
+public Generator(ObfuscationContext context)
+```
+
+Initializes a new Generator instance with the given obfuscation context.
+
+**Parameters:**
+- `context` - The `ObfuscationContext` containing bytecode chunks, settings, and mapping information
+
+**Example:**
+```csharp
+var context = new ObfuscationContext {
+    HeadChunk = chunk,
+    PrimaryXorKey = 123
+};
+var generator = new Generator(context);
+```
+
+## Core Methods
+
+### GenerateVM
+
+```csharp
+public string GenerateVM(ObfuscationSettings settings)
+```
+
+Generates the complete obfuscated virtual machine as Lua source code. This is the main entry point for VM generation.
+
+**Parameters:**
+- `settings` - Configuration options controlling obfuscation features:
+  - `Mutate` - Enable instruction mutations
+  - `MaxMutations` - Maximum number of mutations to generate
+  - `SuperOperators` - Enable super operator optimization
+  - `MaxMegaSuperOperators` - Maximum 60-80 instruction super operators
+  - `MaxMiniSuperOperators` - Maximum 10 instruction super operators
+  - `BytecodeCompress` - Enable LZW compression of bytecode
+  - `PreserveLineInfo` - Preserve source line information for debugging
+
+**Returns:** Complete Lua VM source code as a string
+
+**Example:**
+```csharp
+var settings = new ObfuscationSettings {
+    Mutate = true,
+    MaxMutations = 2000,
+    SuperOperators = true,
+    MaxMegaSuperOperators = 50,
+    MaxMiniSuperOperators = 500,
+    BytecodeCompress = true
+};
+
+string vmCode = generator.GenerateVM(settings);
+```
+
+**Generation Pipeline:**
+
+1. **Opcode Discovery** - Scans the bytecode and finds all used opcodes through reflection
+2. **Mutation Generation** (if enabled) - Creates 35-50 register-shuffled variants per opcode
+3. **Mutation Folding** - Maps mutations to actual instructions in the bytecode
+4. **Super Operator Generation** (if enabled):
+   - Mega super operators: 60-80 consecutive instructions combined
+   - Mini super operators: Up to 10 consecutive instructions combined
+5. **Bytecode Serialization** - Converts chunks to binary format
+6. **Compression** (if enabled) - LZW compression of bytecode string
+7. **VM Assembly** - Combines deserializer, decoder, and opcode dispatcher
+
+### IsUsed
+
+```csharp
+public bool IsUsed(Chunk chunk, VOpcode virt)
+```
+
+Recursively checks if a virtual opcode is used in the chunk or its nested functions.
+
+**Parameters:**
+- `chunk` - The bytecode chunk to scan
+- `virt` - The virtual opcode to check for
+
+**Returns:** `true` if the opcode is used anywhere in the chunk hierarchy
+
+**Side Effects:**
+- Populates `InstructionMapping` in the context
+- Sets `CustomData.Opcode` on matching instructions
+
+## Mutation System
+
+### GenerateMutations
+
+```csharp
+public List<OpMutated> GenerateMutations(List<VOpcode> opcodes)
+```
+
+Creates mutated variants of opcodes by shuffling register operands.
+
+**Parameters:**
+- `opcodes` - List of virtual opcodes to mutate
+
+**Returns:** Shuffled list of mutated opcode variants (35-50 per original opcode)
+
+**Note:** Super operators are excluded from mutation to maintain semantic correctness.
+
+### FoldMutations
+
+```csharp
+public void FoldMutations(List<OpMutated> mutations, HashSet<OpMutated> used, Chunk chunk)
+```
+
+Maps mutated opcodes to actual instructions in the bytecode.
+
+**Parameters:**
+- `mutations` - Pool of available mutations
+- `used` - Set tracking which mutations were actually used
+- `chunk` - Chunk to process
+
+**Special Handling:**
+- Skips instructions following `Closure` (upvalue pseudoinstructions)
+- Preserves control flow integrity
+
+## Super Operator System
+
+### GenerateSuperOperators
+
+```csharp
+public List<OpSuperOperator> GenerateSuperOperators(Chunk chunk, int maxSize, int minSize = 5)
+```
+
+Combines sequences of consecutive instructions into single super operators.
+
+**Parameters:**
+- `chunk` - Chunk to analyze
+- `maxSize` - Maximum instructions per super operator
+- `minSize` - Minimum instructions to form a super operator (default: 5)
+
+**Returns:** List of super operators found in the chunk
+
+**Skipped Instructions:**
+- Jump targets (instructions following jumps, branches, loops)
+- Closure upvalue pseudoinstructions
+- Instructions already part of super operators
+
+### FoldAdditionalSuperOperators
+
+```csharp
+public void FoldAdditionalSuperOperators(Chunk chunk, List<OpSuperOperator> operators, ref int folded)
+```
+
+Applies pre-generated super operators to additional matching instruction sequences.
+
+**Parameters:**
+- `chunk` - Chunk to process
+- `operators` - Super operators to match against
+- `folded` - Counter for number of folded instructions
+
+## Utility Methods
+
+### Compress
+
+```csharp
+public static List<int> Compress(byte[] uncompressed)
+```
+
+LZW compression algorithm for bytecode data.
+
+**Parameters:**
+- `uncompressed` - Raw byte array to compress
+
+**Returns:** List of LZW dictionary indices
+
+### CompressedToString
+
+```csharp
+public static string CompressedToString(List<int> compressed)
+```
+
+Converts compressed data to base-36 encoded string.
+
+**Parameters:**
+- `compressed` - LZW compressed data
+
+**Returns:** Base-36 encoded string representation
+
+### ToBase36
+
+```csharp
+public static string ToBase36(ulong value)
+```
+
+Converts a number to base-36 representation (0-9, A-Z).
+
+**Parameters:**
+- `value` - Number to convert
+
+**Returns:** Base-36 string
+
+## VM Output Structure
+
+The generated VM contains:
+
+1. **Decoder Functions** - String and number decoding utilities
+2. **Decompressor** (if compression enabled) - LZW decompression routine
+3. **Bytecode String** - Serialized chunk data (compressed or raw)
+4. **Deserializer** - Reconstructs chunks from bytecode
+5. **Opcode Dispatcher** - Binary search tree routing instructions to handlers
+6. **Wrapper** - Execution environment setup and invocation
+
+## Performance Characteristics
+
+- **Mutation Count:** 35-50 variants per opcode (random)
+- **Mega Super Operators:** 60-80 instruction sequences
+- **Mini Super Operators:** 5-10 instruction sequences
+- **Opcode Dispatch:** Binary search O(log n) instead of linear lookup
+
+## Related
+
+- [Opcodes](/api/opcodes) - Virtual opcode system
+- [ObfuscationContext](/api/obfuscation-context) - Context object
+- [Serializer](/api/serializer) - Bytecode serialization

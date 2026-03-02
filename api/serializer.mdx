@@ -1,0 +1,241 @@
+---
+title: 'Serializer'
+description: 'Encodes IR structures back to bytecode with obfuscation support'
+---
+
+The `Serializer` class converts IR structures (Chunks, Instructions, Constants) back into binary bytecode format, with support for obfuscation and custom VM instruction encoding.
+
+## Namespace
+
+```csharp
+IronBrew2.Bytecode_Library.Bytecode
+```
+
+## Classes
+
+IronBrew 2 provides two serializer implementations:
+
+### Serializer
+
+The obfuscation-aware serializer that supports custom instruction encoding and XOR encryption.
+
+### VanillaSerializer
+
+A standard Lua 5.1 bytecode serializer without obfuscation features.
+
+## Serializer (Obfuscated)
+
+### Constructor
+
+```csharp
+public Serializer(ObfuscationContext context, ObfuscationSettings settings)
+```
+
+<ParamField path="context" type="ObfuscationContext" required>
+  The obfuscation context containing encoding mappings and configuration
+</ParamField>
+
+<ParamField path="settings" type="ObfuscationSettings" required>
+  Settings controlling obfuscation behavior (e.g., PreserveLineInfo)
+</ParamField>
+
+### Methods
+
+#### SerializeLChunk
+
+```csharp
+public byte[] SerializeLChunk(Chunk chunk, bool factorXor = true)
+```
+
+Serializes a chunk to obfuscated bytecode format.
+
+<ParamField path="chunk" type="Chunk" required>
+  The chunk to serialize
+</ParamField>
+
+<ParamField path="factorXor" type="bool" default="true">
+  Whether to apply XOR encryption using the primary XOR key
+</ParamField>
+
+<ResponseField name="returns" type="byte[]">
+  The serialized bytecode with obfuscation applied
+</ResponseField>
+
+### Encoding Features
+
+The obfuscated serializer supports:
+
+- **XOR Encryption**: All bytes are XORed with PrimaryXorKey
+- **Custom Instruction Encoding**: Uses InstructionType and ConstantMask metadata
+- **Constant Type Mapping**: Remaps constant type IDs via ConstantMapping
+- **Configurable Chunk Steps**: Controls serialization order via ChunkSteps
+- **Virtual Opcodes**: Supports CustomInstructionData for VM virtualization
+- **Line Info Preservation**: Optionally includes line numbers based on settings
+
+### Instruction Encoding Format
+
+```
+Byte 0: (InstructionType << 1) | (ConstantMask << 3)
+Bytes 1-2: OpCode (int16)
+Bytes 3-4: A operand (int16)
+Bytes 5+: B and C operands (format depends on InstructionType)
+```
+
+**InstructionType encoding:**
+- **ABC**: B (int16), C (int16)
+- **ABx**: B (int32)
+- **AsBx**: B + 65536 (int32)
+- **AsBxC**: B + 65536 (int32), C (int16)
+- **Data**: Single byte (0x01)
+
+## VanillaSerializer
+
+### Constructor
+
+```csharp
+public VanillaSerializer(Chunk chunk)
+```
+
+<ParamField path="chunk" type="Chunk" required>
+  The root chunk to serialize
+</ParamField>
+
+### Methods
+
+#### Serialize
+
+```csharp
+public byte[] Serialize()
+```
+
+Serializes the chunk to standard Lua 5.1 bytecode format.
+
+<ResponseField name="returns" type="byte[]">
+  Valid Lua 5.1 bytecode that can be loaded by standard Lua interpreters
+</ResponseField>
+
+### Output Format
+
+Produces standard Lua 5.1 bytecode:
+
+```
+Header (12 bytes)
+├── 0x1B4C7561 ("\x1bLua")
+├── 0x51 (version 5.1)
+├── 0x00 (official format)
+├── 0x01 (little endian)
+├── 0x04 (int size)
+├── 0x04 (size_t size)
+├── 0x04 (instruction size)
+├── 0x08 (number size)
+└── 0x00 (floating point)
+
+Chunk
+└── (Standard chunk structure)
+```
+
+## Usage Example
+
+### Standard Serialization
+
+```csharp
+using System.IO;
+using IronBrew2.Bytecode_Library.Bytecode;
+using IronBrew2.Bytecode_Library.IR;
+
+// Deserialize original bytecode
+byte[] originalBytecode = File.ReadAllBytes("script.luac");
+Deserializer deserializer = new Deserializer(originalBytecode);
+Chunk chunk = deserializer.DecodeFile();
+
+// Modify the chunk...
+// (your modifications here)
+
+// Serialize back to standard Lua bytecode
+VanillaSerializer serializer = new VanillaSerializer(chunk);
+byte[] modifiedBytecode = serializer.Serialize();
+File.WriteAllBytes("modified.luac", modifiedBytecode);
+```
+
+### Obfuscated Serialization
+
+```csharp
+using IronBrew2.Bytecode_Library.Bytecode;
+using IronBrew2.Bytecode_Library.IR;
+using IronBrew2.Obfuscator;
+
+// Load and deserialize
+byte[] bytecode = File.ReadAllBytes("script.luac");
+Deserializer deserializer = new Deserializer(bytecode);
+Chunk chunk = deserializer.DecodeFile();
+
+// Setup obfuscation
+ObfuscationContext context = new ObfuscationContext
+{
+    PrimaryXorKey = 0x42,
+    ConstantMapping = new int[] { 2, 0, 1, 3 }, // Remap constant types
+    ChunkSteps = new ChunkStep[]
+    {
+        ChunkStep.ParameterCount,
+        ChunkStep.Instructions,
+        ChunkStep.Functions,
+        ChunkStep.LineInfo
+    }
+};
+
+ObfuscationSettings settings = new ObfuscationSettings
+{
+    PreserveLineInfo = false // Strip debug info
+};
+
+// Serialize with obfuscation
+Serializer obfuscator = new Serializer(context, settings);
+byte[] obfuscatedBytecode = obfuscator.SerializeLChunk(chunk);
+File.WriteAllBytes("obfuscated.luac", obfuscatedBytecode);
+```
+
+### Round-Trip Test
+
+```csharp
+// Ensure serialization is lossless
+byte[] original = File.ReadAllBytes("script.luac");
+Deserializer d = new Deserializer(original);
+Chunk chunk = d.DecodeFile();
+
+VanillaSerializer s = new VanillaSerializer(chunk);
+byte[] reserialized = s.Serialize();
+
+// Compare (should be identical for vanilla serialization)
+bool identical = original.SequenceEqual(reserialized);
+Console.WriteLine($"Round-trip successful: {identical}");
+```
+
+## Chunk Step Order
+
+The obfuscated serializer allows customizing the order in which chunk components are written:
+
+<ResponseField name="ParameterCount" type="ChunkStep">
+  Write the number of parameters
+</ResponseField>
+
+<ResponseField name="Instructions" type="ChunkStep">
+  Write all instructions
+</ResponseField>
+
+<ResponseField name="Functions" type="ChunkStep">
+  Write nested function chunks recursively
+</ResponseField>
+
+<ResponseField name="LineInfo" type="ChunkStep">
+  Write line number debug information (if PreserveLineInfo is true)
+</ResponseField>
+
+<Note>
+  Reordering chunk steps makes the bytecode incompatible with standard Lua interpreters but increases obfuscation strength.
+</Note>
+
+## See Also
+
+- [Deserializer](/api/deserializer) - Decode bytecode into IR
+- [Chunk](/api/chunk) - The structure being serialized
+- [Instruction](/api/instruction) - Individual bytecode instructions

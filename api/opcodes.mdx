@@ -1,0 +1,395 @@
+---
+title: Opcodes
+description: Virtual opcode system for translating Lua bytecode to obfuscated VM instructions
+---
+
+The opcode system in IronBrew 2 translates standard Lua 5.1 bytecode instructions into obfuscated virtual machine operations. Each opcode variant handles different operand configurations and generates corresponding Lua code.
+
+## VOpcode Base Class
+
+All virtual opcodes inherit from the abstract `VOpcode` class:
+
+```csharp
+public abstract class VOpcode
+{
+    public int VIndex;  // Index in VM opcode table
+    
+    public abstract bool IsInstruction(Instruction instruction);
+    public abstract string GetObfuscated(ObfuscationContext context);
+    public virtual void Mutate(Instruction instruction) { }
+}
+```
+
+### Methods
+
+- **IsInstruction** - Returns `true` if the given bytecode instruction matches this opcode variant
+- **GetObfuscated** - Generates the Lua code that implements this opcode's behavior
+- **Mutate** - Modifies instruction operands before serialization (e.g., adjusting constant indices)
+
+## Standard Opcodes
+
+### Arithmetic Operations
+
+Each arithmetic opcode has multiple variants based on whether operands are registers or constants:
+
+#### OpAdd (Addition)
+
+```csharp
+// Both operands from stack
+public class OpAdd : VOpcode
+{
+    public override bool IsInstruction(Instruction instruction) =>
+        instruction.OpCode == Opcode.Add && instruction.B <= 255 && instruction.C <= 255;
+    
+    public override string GetObfuscated(ObfuscationContext context) =>
+        "Stk[Inst[OP_A]]=Stk[Inst[OP_B]]+Stk[Inst[OP_C]];";
+}
+
+// B operand is constant
+public class OpAddB : VOpcode
+{
+    public override string GetObfuscated(ObfuscationContext context) =>
+        "Stk[Inst[OP_A]] = Inst[OP_B] + Stk[Inst[OP_C]];";
+    
+    public override void Mutate(Instruction instruction)
+    {
+        instruction.B -= 255;
+        instruction.ConstantMask |= InstructionConstantMask.RB;
+    }
+}
+```
+
+**Variants:** `OpAdd`, `OpAddB`, `OpAddC`, `OpAddBC`
+
+**Other Arithmetic Opcodes:**
+- `OpSub` - Subtraction
+- `OpMul` - Multiplication  
+- `OpDiv` - Division
+- `OpMod` - Modulo
+- `OpPow` - Exponentiation
+- `OpUnm` - Unary minus
+
+### Comparison Operations
+
+- `OpEq` - Equality test
+- `OpLt` - Less than
+- `OpLe` - Less than or equal
+- `OpGt` - Greater than
+- `OpGe` - Greater than or equal
+- `OpNe` - Not equal
+
+### Logical Operations
+
+- `OpNot` - Logical NOT
+- `OpTest` - Conditional test
+- `OpTestSet` - Conditional test and assignment
+
+### Data Movement
+
+#### OpMove
+
+```csharp
+public class OpMove : VOpcode
+{
+    public override bool IsInstruction(Instruction instruction) =>
+        instruction.OpCode == Opcode.Move;
+    
+    public override string GetObfuscated(ObfuscationContext context) =>
+        "Stk[Inst[OP_A]]=Stk[Inst[OP_B]];";
+}
+```
+
+#### OpLoadK (Load Constant)
+
+```csharp
+public class OpLoadK : VOpcode
+{
+    public override bool IsInstruction(Instruction instruction) =>
+        instruction.OpCode == Opcode.LoadConst;
+    
+    public override string GetObfuscated(ObfuscationContext context) =>
+        "Stk[Inst[OP_A]] = Inst[OP_B];";
+    
+    public override void Mutate(Instruction instruction)
+    {
+        instruction.B++;  // Adjust constant index
+        instruction.ConstantMask |= InstructionConstantMask.RB;
+    }
+}
+```
+
+**Other Load Operations:**
+- `OpLoadNil` - Load nil values
+- `OpLoadBool` - Load boolean constant
+- `OpLoadStr` - Load string constant
+
+### Table Operations
+
+#### OpGetTable
+
+```csharp
+// Table key from stack
+public class OpGetTable : VOpcode
+{
+    public override string GetObfuscated(ObfuscationContext context) =>
+        "Stk[Inst[OP_A]]=Stk[Inst[OP_B]][Stk[Inst[OP_C]]];";
+}
+
+// Table key is constant
+public class OpGetTableConst : VOpcode
+{
+    public override string GetObfuscated(ObfuscationContext context) =>
+        "Stk[Inst[OP_A]]=Stk[Inst[OP_B]][Inst[OP_C]];";
+}
+```
+
+**Table Opcodes:**
+- `OpGetTable` - Read from table
+- `OpSetTable` - Write to table
+- `OpNewTable` - Create new table
+- `OpSetList` - Batch initialize table elements
+- `OpSelf` - Method call preparation
+
+### Function Operations
+
+#### OpCall (Function Call)
+
+The call instruction has many variants based on argument count (B) and return count (C):
+
+```csharp
+// Known arg and return counts
+public class OpCall : VOpcode
+{
+    public override bool IsInstruction(Instruction instruction) =>
+        instruction.OpCode == Opcode.Call && instruction.B > 2 && instruction.C > 2;
+    
+    public override string GetObfuscated(ObfuscationContext context) => @"
+        local A = Inst[OP_A]
+        local Results = { Stk[A](Unpack(Stk, A + 1, Inst[OP_B])) };
+        local Edx = 0;
+        for Idx = A, Inst[OP_C] do 
+            Edx = Edx + 1;
+            Stk[Idx] = Results[Edx];
+        end
+    ";
+}
+
+// Variable return count
+public class OpCallC0 : VOpcode
+{
+    public override string GetObfuscated(ObfuscationContext context) => @"
+        local A = Inst[OP_A]
+        local Results, Limit = _R(Stk[A](Unpack(Stk, A + 1, Inst[OP_B])))
+        Top = Limit + A - 1
+        local Edx = 0;
+        for Idx = A, Top do 
+            Edx = Edx + 1;
+            Stk[Idx] = Results[Edx];
+        end;
+    ";
+}
+```
+
+**Call Variants:** `OpCall`, `OpCallB0`, `OpCallB1`, `OpCallB2`, `OpCallC0`, `OpCallC1`, `OpCallC2`, and combinations
+
+**Other Function Opcodes:**
+- `OpTailCall` - Tail call optimization
+- `OpReturn` - Return from function
+- `OpClosure` - Create closure
+- `OpVarArg` - Variable argument access
+
+### Control Flow
+
+- `OpJmp` - Unconditional jump
+- `OpForLoop` - Numeric for loop iteration
+- `OpForPrep` - Numeric for loop initialization  
+- `OpTForLoop` - Generic for loop iteration
+
+### Environment Operations
+
+- `OpGetGlobal` - Read global variable
+- `OpSetGlobal` - Write global variable
+- `OpGetUpval` - Read upvalue
+- `OpSetUpval` - Write upvalue
+- `OpSetFEnv` - Set function environment
+- `OpClose` - Close upvalues
+
+### Stack Operations
+
+- `OpSetTop` - Adjust stack top
+- `OpNewStk` - Allocate stack slots
+- `OpPushStk` - Push to stack
+
+### Utility Operations
+
+- `OpLen` - Length operator (#)
+- `OpConcat` - String concatenation
+
+## Special Opcode Types
+
+### OpMutated (Register Shuffling)
+
+Wraps an opcode with shuffled register operands to increase diversity:
+
+```csharp
+public class OpMutated : VOpcode
+{
+    public VOpcode Mutated;      // The original opcode
+    public int[] Registers;      // Shuffled register mapping [A, B, C]
+    
+    public override string GetObfuscated(ObfuscationContext context)
+    {
+        return Mutated.GetObfuscated(context);
+    }
+}
+```
+
+**Purpose:** Creates 35-50 variants per opcode by randomly shuffling operand positions
+
+**Example:**
+- Original: `Stk[A] = Stk[B] + Stk[C]`
+- Mutated: `Stk[B] = Stk[C] + Stk[A]` (registers shuffled [1, 2, 0])
+
+### OpSuperOperator (Instruction Fusion)
+
+Combines multiple consecutive instructions into a single opcode:
+
+```csharp
+public class OpSuperOperator : VOpcode
+{
+    public VOpcode[] SubOpcodes;  // Array of combined opcodes
+    
+    public bool IsInstruction(List<Instruction> instructions)
+    {
+        if (instructions.Count != SubOpcodes.Length)
+            return false;
+        
+        for (int i = 0; i < SubOpcodes.Length; i++)
+            if (!SubOpcodes[i].IsInstruction(instructions[i]))
+                return false;
+        
+        return true;
+    }
+    
+    public override string GetObfuscated(ObfuscationContext context)
+    {
+        string s = "";
+        List<string> locals = new List<string>();
+        
+        for (int i = 0; i < SubOpcodes.Length; i++)
+        {
+            s += SubOpcodes[i].GetObfuscated(context);
+            
+            if (i + 1 < SubOpcodes.Length)
+                s += "InstrPoint = InstrPoint + 1;Inst = Instr[InstrPoint];";
+        }
+        
+        return s;
+    }
+}
+```
+
+**Types:**
+- **Mega Super Operators:** 60-80 instructions combined
+- **Mini Super Operators:** 5-10 instructions combined
+
+**Benefits:**
+- Reduces opcode dispatch overhead
+- Harder to identify individual instruction boundaries
+- Combines local variable declarations
+
+**Constraints:**
+- Cannot cross control flow boundaries (jumps, branches)
+- Skips closure upvalue pseudoinstructions
+- Requires exact sequence match
+
+## Opcode Dispatch
+
+Opcodes are dispatched using a binary search tree for O(log n) performance:
+
+```lua
+if Enum <= 127 then
+    if Enum <= 63 then
+        if Enum == 42 then
+            -- OpMove handler
+        else
+            -- Other opcodes
+        end
+    else
+        -- More opcodes
+    end
+else
+    -- More opcodes
+end
+```
+
+## Instruction Format
+
+Instructions in the VM use a 4-element array:
+
+```lua
+Inst = {
+    [1] = Opcode,     -- OP_ENUM: Virtual opcode index
+    [2] = A,          -- OP_A: First operand
+    [3] = B,          -- OP_B: Second operand  
+    [4] = C           -- OP_C: Third operand
+}
+```
+
+**Constant Encoding:**
+- Register operands: 0-255
+- Constant operands: > 255 (index - 255 after mutation)
+
+## Complete Opcode List
+
+The following opcodes are implemented (based on Lua 5.1 instruction set):
+
+| Category | Opcodes |
+|----------|----------|
+| Arithmetic | Add, Sub, Mul, Div, Mod, Pow, Unm |
+| Comparison | Eq, Lt, Le, Gt, Ge, Ne |
+| Logical | Not, Test, TestSet |
+| Data Movement | Move, LoadK, LoadStr, LoadNil, LoadBool |
+| Tables | GetTable, SetTable, NewTable, SetList, Self |
+| Functions | Call, TailCall, Return, Closure, VarArg |
+| Control Flow | Jmp, ForLoop, ForPrep, TForLoop |
+| Environment | GetGlobal, SetGlobal, GetUpval, SetUpval, SetFEnv, Close |
+| Stack | SetTop, NewStk, PushStk |
+| Utility | Len, Concat |
+| Special | Mutated, SuperOperator |
+
+## Example: OpAdd Transformation
+
+**Original Lua:**
+```lua
+local result = a + b
+```
+
+**Lua 5.1 Bytecode:**
+```
+ADD  2 0 1  ; R(2) := R(0) + R(1)
+```
+
+**VM Instruction:**
+```lua
+Inst = {42, 2, 0, 1}  -- [Opcode, A, B, C]
+```
+
+**Generated Code (OpAdd):**
+```lua
+Stk[Inst[2]] = Stk[Inst[3]] + Stk[Inst[4]]
+-- Expands to: Stk[2] = Stk[0] + Stk[1]
+```
+
+**If Mutated:**
+```lua
+-- Registers shuffled, different virtual opcode index
+Inst = {137, 0, 1, 2}  -- Different opcode variant
+Stk[Inst[2]] = Stk[Inst[3]] + Stk[Inst[4]]
+```
+
+## Related
+
+- [Generator](/api/generator) - VM generation orchestration
+- [Serializer](/api/serializer) - Bytecode encoding
+- [ObfuscationContext](/api/obfuscation-context) - Shared state

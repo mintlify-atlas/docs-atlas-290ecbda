@@ -1,0 +1,194 @@
+---
+title: ObfuscationContext
+description: Internal context object that manages obfuscation state and randomization during VM generation
+---
+
+The `ObfuscationContext` class encapsulates the state and randomization data used throughout the obfuscation pipeline. It is automatically created by the obfuscation process and manages instruction mappings, execution order shuffling, and encryption keys.
+
+## Constructor
+
+```csharp
+public ObfuscationContext(Chunk chunk)
+```
+
+<ParamField path="chunk" type="Chunk" required>
+  The root bytecode chunk to obfuscate. This is obtained by deserializing compiled Lua bytecode.
+</ParamField>
+
+## Properties
+
+### Bytecode Structure
+
+<ResponseField name="HeadChunk" type="Chunk">
+  The root chunk containing all bytecode instructions, constants, and nested functions.
+</ResponseField>
+
+<ResponseField name="InstructionMapping" type="Dictionary<Opcode, VOpcode>">
+  Maps standard Lua opcodes to their virtualized equivalents. Used by the VM generator to translate bytecode into custom VM instructions.
+</ResponseField>
+
+### Execution Order Randomization
+
+<ResponseField name="ChunkSteps" type="ChunkStep[]">
+  Randomized order for deserializing chunk components. Shuffles the sequence of:
+  - `ParameterCount` - Function parameter count
+  - `StringTable` - String constant table
+  - `Instructions` - Bytecode instructions
+  - `Functions` - Nested function definitions
+  - `LineInfo` - Debug line information
+</ResponseField>
+
+<ResponseField name="InstructionSteps1" type="InstructionStep1[]">
+  Randomized order for deserializing instruction format 1 fields (Type, A, B, C registers).
+</ResponseField>
+
+<ResponseField name="InstructionSteps2" type="InstructionStep2[]">
+  Randomized order for deserializing instruction format 2 fields (Op, Bx, D operands).
+</ResponseField>
+
+<ResponseField name="ConstantMapping" type="int[]">
+  Randomized mapping for constant type encoding (0-3). Shuffles the order in which constant types are identified.
+</ResponseField>
+
+### Encryption Keys
+
+<ResponseField name="PrimaryXorKey" type="int">
+  Primary XOR key (0-255) used for bytecode encryption. Randomly generated during context initialization.
+</ResponseField>
+
+<ResponseField name="IXorKey1" type="int">
+  First instruction XOR key (0-255) for additional instruction-level encryption. Randomly generated during context initialization.
+</ResponseField>
+
+<ResponseField name="IXorKey2" type="int">
+  Second instruction XOR key (0-255) for multi-layer instruction encryption. Randomly generated during context initialization.
+</ResponseField>
+
+## Enumerations
+
+### ChunkStep
+
+Defines the components of a chunk that can be shuffled:
+
+```csharp
+public enum ChunkStep
+{
+    ParameterCount,
+    StringTable,
+    Instructions,
+    Functions,
+    LineInfo,
+    StepCount
+}
+```
+
+### InstructionStep1
+
+Defines fields for instruction format 1:
+
+```csharp
+public enum InstructionStep1
+{
+    Type,
+    A,
+    B,
+    C,
+    StepCount
+}
+```
+
+### InstructionStep2
+
+Defines fields for instruction format 2:
+
+```csharp
+public enum InstructionStep2
+{
+    Op,
+    Bx,
+    D,
+    StepCount
+}
+```
+
+## Initialization Behavior
+
+When a new `ObfuscationContext` is created, it automatically:
+
+1. **Stores the bytecode chunk** for VM generation
+2. **Shuffles chunk deserialization order** - Randomizes the sequence in which chunk components are processed
+3. **Shuffles instruction deserialization order** - Randomizes both instruction format orderings
+4. **Shuffles constant type mapping** - Randomizes constant type encoding
+5. **Generates encryption keys** - Creates three random XOR keys for bytecode encryption
+
+## Usage in Obfuscation Pipeline
+
+The context is created and used internally by the `IB2.Obfuscate` method:
+
+```csharp
+// From IronBrew2/Program.cs:142
+Deserializer des = new Deserializer(File.ReadAllBytes("luac.out"));
+Chunk lChunk = des.DecodeFile();
+
+// Control flow obfuscation
+if (settings.ControlFlow)
+{
+    CFContext cf = new CFContext(lChunk);
+    cf.DoChunks();
+}
+
+// Create obfuscation context
+ObfuscationContext context = new ObfuscationContext(lChunk);
+
+// Generate VM with randomized execution order
+string vmCode = new Generator(context).GenerateVM(settings);
+```
+
+## Randomization Impact
+
+Each obfuscation run produces unique output due to randomized:
+- Chunk component deserialization order
+- Instruction field access patterns
+- Constant type encoding
+- XOR encryption keys
+
+This makes pattern-based detection and automated deobfuscation significantly harder.
+
+## Example
+
+While you typically don't create `ObfuscationContext` directly, here's how it's used internally:
+
+```csharp
+using IronBrew2.Bytecode_Library.Bytecode;
+using IronBrew2.Obfuscator;
+using IronBrew2.Obfuscator.VM_Generation;
+
+// Deserialize bytecode
+var deserializer = new Deserializer(bytecode);
+var chunk = deserializer.DecodeFile();
+
+// Create context (automatically randomizes)
+var context = new ObfuscationContext(chunk);
+
+// Context now contains:
+// - Shuffled ChunkSteps ordering
+// - Shuffled InstructionSteps1 and InstructionSteps2
+// - Random XOR keys (PrimaryXorKey, IXorKey1, IXorKey2)
+// - Empty InstructionMapping (populated by Generator)
+
+// Generate VM using this context
+var generator = new Generator(context);
+string vmCode = generator.GenerateVM(settings);
+```
+
+<Note>
+The `ObfuscationContext` is an internal implementation detail. You don't need to create or manipulate it directly when using the `IB2.Obfuscate` method.
+</Note>
+
+<Tip>
+The randomization performed by `ObfuscationContext` ensures that obfuscating the same script twice produces different output each time, preventing signature-based detection.
+</Tip>
+
+## Source Reference
+
+Source: `IronBrew2/Obfuscator/ObfuscationContext.cs:37`

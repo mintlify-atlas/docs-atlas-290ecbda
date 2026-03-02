@@ -1,0 +1,177 @@
+---
+title: ObfuscationSettings
+description: Configuration class for controlling IronBrew 2 obfuscation behavior
+---
+
+The `ObfuscationSettings` class configures all aspects of the obfuscation process, from string encryption to control flow and VM generation parameters.
+
+## Constructor
+
+```csharp
+public ObfuscationSettings()
+```
+
+Creates a new instance with default values optimized for balanced obfuscation strength and performance.
+
+## Properties
+
+### String Encryption
+
+<ResponseField name="EncryptStrings" type="bool" default="false">
+  Enables encryption of all string constants in the script. Encrypted strings are decrypted at runtime by the VM.
+</ResponseField>
+
+<ResponseField name="EncryptImportantStrings" type="bool" default="false">
+  Enables selective encryption of important strings only (function names, critical constants). More targeted than `EncryptStrings`.
+</ResponseField>
+
+<ResponseField name="DecryptTableLen" type="int" default="500">
+  Size of the decryption table used for string encryption. Larger values increase randomness but also output size.
+</ResponseField>
+
+### Control Flow Obfuscation
+
+<ResponseField name="ControlFlow" type="bool" default="true">
+  Enables control flow obfuscation to make the code execution path harder to follow. Applies transformations like opaque predicates and conditional bouncing.
+</ResponseField>
+
+### Bytecode Processing
+
+<ResponseField name="BytecodeCompress" type="bool" default="true">
+  Enables bytecode compression to reduce the size of the serialized VM data.
+</ResponseField>
+
+<ResponseField name="PreserveLineInfo" type="bool" default="false">
+  Preserves original line number information in the obfuscated output. Useful for debugging but reveals code structure.
+</ResponseField>
+
+### Mutation and Super Operators
+
+<ResponseField name="Mutate" type="bool" default="true">
+  Enables instruction mutation that transforms standard operations into complex equivalent forms.
+</ResponseField>
+
+<ResponseField name="SuperOperators" type="bool" default="true">
+  Enables super operators that combine multiple instructions into single virtualized operations.
+</ResponseField>
+
+<ResponseField name="MaxMiniSuperOperators" type="int" default="120">
+  Maximum number of mini super operators to generate. Mini super operators combine 2-3 instructions.
+</ResponseField>
+
+<ResponseField name="MaxMegaSuperOperators" type="int" default="120">
+  Maximum number of mega super operators to generate. Mega super operators combine 4+ instructions.
+</ResponseField>
+
+<ResponseField name="MaxMutations" type="int" default="200">
+  Maximum number of instruction mutations to apply. Higher values increase obfuscation strength but also processing time.
+</ResponseField>
+
+## Default Configuration
+
+The default constructor initializes settings with these values:
+
+```csharp
+var settings = new ObfuscationSettings()
+{
+    EncryptStrings = false,
+    EncryptImportantStrings = false,
+    ControlFlow = true,
+    BytecodeCompress = true,
+    DecryptTableLen = 500,
+    PreserveLineInfo = false,
+    Mutate = true,
+    SuperOperators = true,
+    MaxMegaSuperOperators = 120,
+    MaxMiniSuperOperators = 120,
+    MaxMutations = 200
+};
+```
+
+## Usage Examples
+
+### Minimal Obfuscation
+
+Fastest obfuscation with basic protection:
+
+```csharp
+var settings = new ObfuscationSettings()
+{
+    ControlFlow = false,
+    Mutate = false,
+    SuperOperators = false,
+    MaxMutations = 0
+};
+
+IB2.Obfuscate("temp", "script.lua", settings, out string error);
+```
+
+### Maximum Obfuscation
+
+Strongest protection with all features enabled:
+
+```csharp
+var settings = new ObfuscationSettings()
+{
+    EncryptStrings = true,
+    EncryptImportantStrings = true,
+    ControlFlow = true,
+    BytecodeCompress = true,
+    DecryptTableLen = 1000,
+    Mutate = true,
+    SuperOperators = true,
+    MaxMiniSuperOperators = 200,
+    MaxMegaSuperOperators = 200,
+    MaxMutations = 500
+};
+
+IB2.Obfuscate("temp", "script.lua", settings, out string error);
+```
+
+### Debug-Friendly Obfuscation
+
+Preserves line information for debugging:
+
+```csharp
+var settings = new ObfuscationSettings()
+{
+    PreserveLineInfo = true,
+    ControlFlow = false
+};
+
+IB2.Obfuscate("temp", "script.lua", settings, out string error);
+```
+
+### Balanced Production Settings
+
+Good protection with reasonable performance:
+
+```csharp
+var settings = new ObfuscationSettings(); // Use defaults
+settings.EncryptImportantStrings = true;   // Add string encryption
+
+IB2.Obfuscate("temp", "script.lua", settings, out string error);
+```
+
+## Performance Considerations
+
+<Tip>
+Higher values for `MaxMiniSuperOperators`, `MaxMegaSuperOperators`, and `MaxMutations` increase obfuscation strength but also:
+- Increase obfuscation processing time
+- Increase output file size
+- May slightly reduce runtime performance of obfuscated scripts
+</Tip>
+
+## Security Recommendations
+
+<Warning>
+**Never enable `PreserveLineInfo` in production**. Line information reveals the original code structure and makes reverse engineering easier.
+</Warning>
+
+<Note>
+For sensitive scripts, enable both `EncryptStrings` and `EncryptImportantStrings` to protect string constants from static analysis.
+</Note>
+
+## Source Reference
+
+Source: `IronBrew2/Obfuscator/ObfuscationSettings.cs:3`
